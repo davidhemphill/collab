@@ -2,23 +2,23 @@
 
 declare(strict_types=1);
 
-namespace Collab\Protocol;
+namespace Hemp\Collab\Protocol;
 
-use Collab\Protocol\Message\Authentication;
-use Collab\Protocol\Message\Awareness;
-use Collab\Protocol\Message\Close;
-use Collab\Protocol\Message\ProviderMessage;
-use Collab\Protocol\Message\QueryAwareness;
-use Collab\Protocol\Message\Stateless;
-use Collab\Protocol\Message\Sync;
-use Collab\Protocol\Message\SyncStatus;
-use Yjs\Binary\DecodeLimits;
-use Yjs\Binary\Decoder;
-use Yjs\Exception\DecodeException;
-use Yjs\Exception\MalformedInput;
-use Yjs\Protocol\Awareness\AwarenessLimits;
-use Yjs\Protocol\Awareness\AwarenessUpdate;
-use Yjs\Protocol\Sync\SyncMessageReader;
+use Hemp\Collab\Protocol\Message\Authentication;
+use Hemp\Collab\Protocol\Message\Awareness;
+use Hemp\Collab\Protocol\Message\Close;
+use Hemp\Collab\Protocol\Message\ProviderMessage;
+use Hemp\Collab\Protocol\Message\QueryAwareness;
+use Hemp\Collab\Protocol\Message\Stateless;
+use Hemp\Collab\Protocol\Message\Sync;
+use Hemp\Collab\Protocol\Message\SyncStatus;
+use Hemp\Yjs\Binary\DecodeLimits;
+use Hemp\Yjs\Binary\Decoder;
+use Hemp\Yjs\Exception\DecodeException;
+use Hemp\Yjs\Exception\MalformedInput;
+use Hemp\Yjs\Protocol\Awareness\AwarenessLimits;
+use Hemp\Yjs\Protocol\Awareness\AwarenessUpdate;
+use Hemp\Yjs\Protocol\Sync\SyncMessageReader;
 
 /**
  * Reads an addressed frame off the wire.

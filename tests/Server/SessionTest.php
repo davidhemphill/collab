@@ -2,26 +2,26 @@
 
 declare(strict_types=1);
 
-use Collab\Protocol\AddressedFrame;
-use Collab\Protocol\FrameReader;
-use Collab\Protocol\Message\Authentication;
-use Collab\Protocol\Message\Awareness;
-use Collab\Protocol\Message\QueryAwareness;
-use Collab\Protocol\Message\Sync;
-use Collab\Protocol\Message\SyncStatus;
-use Collab\Protocol\Scope;
-use Collab\Server\Authenticated;
-use Collab\Server\AuthenticationFailed;
-use Collab\Server\Authenticator;
-use Collab\Server\DocumentStore;
-use Collab\Server\Session;
-use Collab\Tests\Support\Transcripts;
-use Yjs\Id\StateVector;
-use Yjs\Protocol\Awareness\AwarenessEntry;
-use Yjs\Protocol\Awareness\AwarenessUpdate;
-use Yjs\Protocol\Sync\SyncStep1;
-use Yjs\Protocol\Sync\SyncStep2;
-use Yjs\Update\Update;
+use Hemp\Collab\Protocol\AddressedFrame;
+use Hemp\Collab\Protocol\FrameReader;
+use Hemp\Collab\Protocol\Message\Authentication;
+use Hemp\Collab\Protocol\Message\Awareness;
+use Hemp\Collab\Protocol\Message\QueryAwareness;
+use Hemp\Collab\Protocol\Message\Sync;
+use Hemp\Collab\Protocol\Message\SyncStatus;
+use Hemp\Collab\Protocol\Scope;
+use Hemp\Collab\Server\Authenticated;
+use Hemp\Collab\Server\AuthenticationFailed;
+use Hemp\Collab\Server\Authenticator;
+use Hemp\Collab\Server\DocumentStore;
+use Hemp\Collab\Server\Session;
+use Hemp\Collab\Tests\Support\Transcripts;
+use Hemp\Yjs\Id\StateVector;
+use Hemp\Yjs\Protocol\Awareness\AwarenessEntry;
+use Hemp\Yjs\Protocol\Awareness\AwarenessUpdate;
+use Hemp\Yjs\Protocol\Sync\SyncStep1;
+use Hemp\Yjs\Protocol\Sync\SyncStep2;
+use Hemp\Yjs\Update\Update;
 
 /**
  * The session state machine, driven with no framework underneath it.

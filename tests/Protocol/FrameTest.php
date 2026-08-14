@@ -2,24 +2,24 @@
 
 declare(strict_types=1);
 
-use Collab\Protocol\AddressedFrame;
-use Collab\Protocol\AuthMessageType;
-use Collab\Protocol\CompatibilityProfile;
-use Collab\Protocol\FrameReader;
-use Collab\Protocol\Message\Authentication;
-use Collab\Protocol\Message\Awareness;
-use Collab\Protocol\Message\Close;
-use Collab\Protocol\Message\QueryAwareness;
-use Collab\Protocol\Message\Stateless;
-use Collab\Protocol\Message\SyncStatus;
-use Collab\Protocol\MessageType;
-use Collab\Protocol\Scope;
-use Collab\Tests\Support\Transcripts;
-use Yjs\Exception\DecodeException;
-use Yjs\Exception\MalformedInput;
-use Yjs\Protocol\Sync\SyncStep1;
-use Yjs\Protocol\Sync\SyncStep2;
-use Yjs\Protocol\Sync\SyncUpdate;
+use Hemp\Collab\Protocol\AddressedFrame;
+use Hemp\Collab\Protocol\AuthMessageType;
+use Hemp\Collab\Protocol\CompatibilityProfile;
+use Hemp\Collab\Protocol\FrameReader;
+use Hemp\Collab\Protocol\Message\Authentication;
+use Hemp\Collab\Protocol\Message\Awareness;
+use Hemp\Collab\Protocol\Message\Close;
+use Hemp\Collab\Protocol\Message\QueryAwareness;
+use Hemp\Collab\Protocol\Message\Stateless;
+use Hemp\Collab\Protocol\Message\SyncStatus;
+use Hemp\Collab\Protocol\MessageType;
+use Hemp\Collab\Protocol\Scope;
+use Hemp\Collab\Tests\Support\Transcripts;
+use Hemp\Yjs\Exception\DecodeException;
+use Hemp\Yjs\Exception\MalformedInput;
+use Hemp\Yjs\Protocol\Sync\SyncStep1;
+use Hemp\Yjs\Protocol\Sync\SyncStep2;
+use Hemp\Yjs\Protocol\Sync\SyncUpdate;
 
 $cases = array_map(fn (array $case) => [$case], Transcripts::cases());
 $reader = new FrameReader;

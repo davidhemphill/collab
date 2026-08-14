@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace Collab\Protocol\Message;
+namespace Hemp\Collab\Protocol\Message;
 
-use Collab\Protocol\AddressedFrame;
-use Collab\Protocol\MessageType;
-use Yjs\Binary\Encoder;
+use Hemp\Collab\Protocol\AddressedFrame;
+use Hemp\Collab\Protocol\MessageType;
+use Hemp\Yjs\Binary\Encoder;
 
 /**
  * The payload of an addressed frame, after the document name and type byte.

@@ -2,12 +2,12 @@
 
 declare(strict_types=1);
 
-namespace Collab\Protocol\Message;
+namespace Hemp\Collab\Protocol\Message;
 
-use Collab\Protocol\AuthMessageType;
-use Collab\Protocol\MessageType;
-use Collab\Protocol\Scope;
-use Yjs\Binary\Encoder;
+use Hemp\Collab\Protocol\AuthMessageType;
+use Hemp\Collab\Protocol\MessageType;
+use Hemp\Collab\Protocol\Scope;
+use Hemp\Yjs\Binary\Encoder;
 
 /**
  * The authentication exchange, in all four of its shapes.

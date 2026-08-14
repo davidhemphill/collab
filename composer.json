@@ -29,12 +29,12 @@
     ],
     "autoload": {
         "psr-4": {
-            "Collab\\": "src/"
+            "Hemp\\Collab\\": "src/"
         }
     },
     "autoload-dev": {
         "psr-4": {
-            "Collab\\Tests\\": "tests/"
+            "Hemp\\Collab\\Tests\\": "tests/"
         }
     },
     "scripts": {

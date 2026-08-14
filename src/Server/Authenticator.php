@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Collab\Server;
+namespace Hemp\Collab\Server;
 
 /**
  * Decides whether a token may open a document, and with what scope.

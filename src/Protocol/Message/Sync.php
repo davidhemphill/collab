@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace Collab\Protocol\Message;
+namespace Hemp\Collab\Protocol\Message;
 
-use Collab\Protocol\MessageType;
-use Yjs\Binary\Encoder;
-use Yjs\Protocol\Sync\SyncMessage;
+use Hemp\Collab\Protocol\MessageType;
+use Hemp\Yjs\Binary\Encoder;
+use Hemp\Yjs\Protocol\Sync\SyncMessage;
 
 /**
  * A y-protocols sync message, addressed to a document.

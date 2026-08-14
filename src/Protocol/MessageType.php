@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Collab\Protocol;
+namespace Hemp\Collab\Protocol;
 
 /**
  * The Hocuspocus provider message types.

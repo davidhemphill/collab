@@ -12,7 +12,7 @@
             "dist": {
                 "type": "path",
                 "url": "../yjs-php",
-                "reference": "8e1c1f67aa8cdec3c6be68be8b297743543207fe"
+                "reference": "17cda43bb40d019a801b68b2cb327031c3c20ca3"
             },
             "require": {
                 "php": "^8.4"
@@ -24,7 +24,7 @@
             "type": "library",
             "autoload": {
                 "psr-4": {
-                    "Yjs\\": "src/"
+                    "Hemp\\Yjs\\": "src/"
                 },
                 "files": [
                     "src/bootstrap.php"
@@ -32,7 +32,7 @@
             },
             "autoload-dev": {
                 "psr-4": {
-                    "Yjs\\Tests\\": "tests/"
+                    "Hemp\\Yjs\\Tests\\": "tests/"
                 }
             },
             "scripts": {

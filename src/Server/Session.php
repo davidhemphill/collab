@@ -2,24 +2,24 @@
 
 declare(strict_types=1);
 
-namespace Collab\Server;
+namespace Hemp\Collab\Server;
 
-use Collab\Protocol\AddressedFrame;
-use Collab\Protocol\Message\Authentication;
-use Collab\Protocol\Message\Awareness;
-use Collab\Protocol\Message\ProviderMessage;
-use Collab\Protocol\Message\QueryAwareness;
-use Collab\Protocol\Message\Sync;
-use Collab\Protocol\Message\SyncStatus;
-use Collab\Protocol\Scope;
+use Hemp\Collab\Protocol\AddressedFrame;
+use Hemp\Collab\Protocol\Message\Authentication;
+use Hemp\Collab\Protocol\Message\Awareness;
+use Hemp\Collab\Protocol\Message\ProviderMessage;
+use Hemp\Collab\Protocol\Message\QueryAwareness;
+use Hemp\Collab\Protocol\Message\Sync;
+use Hemp\Collab\Protocol\Message\SyncStatus;
+use Hemp\Collab\Protocol\Scope;
+use Hemp\Yjs\Protocol\Awareness\AwarenessStore;
+use Hemp\Yjs\Protocol\Sync\ReadOnlyPolicy;
+use Hemp\Yjs\Protocol\Sync\SyncAdmission;
+use Hemp\Yjs\Protocol\Sync\SyncStep1;
+use Hemp\Yjs\Protocol\Sync\SyncStep2;
+use Hemp\Yjs\Protocol\Sync\SyncUpdate;
+use Hemp\Yjs\Update\Update;
 use Throwable;
-use Yjs\Protocol\Awareness\AwarenessStore;
-use Yjs\Protocol\Sync\ReadOnlyPolicy;
-use Yjs\Protocol\Sync\SyncAdmission;
-use Yjs\Protocol\Sync\SyncStep1;
-use Yjs\Protocol\Sync\SyncStep2;
-use Yjs\Protocol\Sync\SyncUpdate;
-use Yjs\Update\Update;
 
 /**
  * One client's conversation about one document.

@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace Collab\Protocol;
+namespace Hemp\Collab\Protocol;
 
-use Collab\Protocol\Message\ProviderMessage;
-use Yjs\Binary\Encoder;
+use Hemp\Collab\Protocol\Message\ProviderMessage;
+use Hemp\Yjs\Binary\Encoder;
 
 /**
  * One WebSocket frame: which document it concerns, and what it says.

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Collab\Protocol;
+namespace Hemp\Collab\Protocol;
 
 /**
  * The close codes the provider recognizes.

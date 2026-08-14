@@ -68,7 +68,7 @@ mistake would hold until it didn't.
 `FrameReader` is the outermost surface facing the network, and every frame
 reaching it may come from a socket that has not authenticated yet. It inherits
 yjs-php's bounded decoder: declared lengths are checked before anything is
-allocated, and every failure is a typed `Yjs\Exception\DecodeException` a
+allocated, and every failure is a typed `Hemp\Yjs\Exception\DecodeException` a
 connection handler can catch in one place. The suite asserts that over every
 truncation and random corruption of every committed transcript.
 

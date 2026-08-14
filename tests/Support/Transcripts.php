@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Collab\Tests\Support;
+namespace Hemp\Collab\Tests\Support;
 
 use RuntimeException;
 

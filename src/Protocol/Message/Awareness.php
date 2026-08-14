@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace Collab\Protocol\Message;
+namespace Hemp\Collab\Protocol\Message;
 
-use Collab\Protocol\MessageType;
-use Yjs\Binary\Encoder;
-use Yjs\Protocol\Awareness\AwarenessUpdate;
+use Hemp\Collab\Protocol\MessageType;
+use Hemp\Yjs\Binary\Encoder;
+use Hemp\Yjs\Protocol\Awareness\AwarenessUpdate;
 
 /**
  * An awareness update, addressed to a document.

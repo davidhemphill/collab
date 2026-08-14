@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace Collab\Server;
+namespace Hemp\Collab\Server;
 
-use Collab\Protocol\Scope;
+use Hemp\Collab\Protocol\Scope;
 
 /**
  * The outcome of a successful authentication.

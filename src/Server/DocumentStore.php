@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace Collab\Server;
+namespace Hemp\Collab\Server;
 
-use Yjs\Update\Update;
+use Hemp\Yjs\Update\Update;
 
 /**
  * Where a document's collaborative state lives.
