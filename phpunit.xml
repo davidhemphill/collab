@@ -11,6 +11,9 @@
         <testsuite name="Protocol">
             <directory>tests/Protocol</directory>
         </testsuite>
+        <testsuite name="Server">
+            <directory>tests/Server</directory>
+        </testsuite>
     </testsuites>
     <source>
         <include>
