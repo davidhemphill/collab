@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace Hocuspocus\Protocol\Message;
+namespace Collab\Protocol\Message;
 
-use Hocuspocus\Protocol\MessageType;
+use Collab\Protocol\MessageType;
 use Yjs\Binary\Encoder;
 use Yjs\Protocol\Awareness\AwarenessUpdate;
 

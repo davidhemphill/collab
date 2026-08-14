@@ -2,20 +2,20 @@
 
 declare(strict_types=1);
 
-use Hocuspocus\Protocol\AddressedFrame;
-use Hocuspocus\Protocol\FrameReader;
-use Hocuspocus\Protocol\Message\Authentication;
-use Hocuspocus\Protocol\Message\Awareness;
-use Hocuspocus\Protocol\Message\QueryAwareness;
-use Hocuspocus\Protocol\Message\Sync;
-use Hocuspocus\Protocol\Message\SyncStatus;
-use Hocuspocus\Protocol\Scope;
-use Hocuspocus\Server\Authenticated;
-use Hocuspocus\Server\AuthenticationFailed;
-use Hocuspocus\Server\Authenticator;
-use Hocuspocus\Server\DocumentStore;
-use Hocuspocus\Server\Session;
-use Hocuspocus\Tests\Support\Transcripts;
+use Collab\Protocol\AddressedFrame;
+use Collab\Protocol\FrameReader;
+use Collab\Protocol\Message\Authentication;
+use Collab\Protocol\Message\Awareness;
+use Collab\Protocol\Message\QueryAwareness;
+use Collab\Protocol\Message\Sync;
+use Collab\Protocol\Message\SyncStatus;
+use Collab\Protocol\Scope;
+use Collab\Server\Authenticated;
+use Collab\Server\AuthenticationFailed;
+use Collab\Server\Authenticator;
+use Collab\Server\DocumentStore;
+use Collab\Server\Session;
+use Collab\Tests\Support\Transcripts;
 use Yjs\Id\StateVector;
 use Yjs\Protocol\Awareness\AwarenessEntry;
 use Yjs\Protocol\Awareness\AwarenessUpdate;

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Hocuspocus\Protocol;
+namespace Collab\Protocol;
 
 /**
  * The exact client software this server is built to interoperate with.

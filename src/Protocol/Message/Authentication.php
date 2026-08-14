@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace Hocuspocus\Protocol\Message;
+namespace Collab\Protocol\Message;
 
-use Hocuspocus\Protocol\AuthMessageType;
-use Hocuspocus\Protocol\MessageType;
-use Hocuspocus\Protocol\Scope;
+use Collab\Protocol\AuthMessageType;
+use Collab\Protocol\MessageType;
+use Collab\Protocol\Scope;
 use Yjs\Binary\Encoder;
 
 /**

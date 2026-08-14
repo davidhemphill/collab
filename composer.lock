@@ -4,15 +4,15 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "116f1b2845555f65f6baa9456495e3bc",
+    "content-hash": "4c954f2046a30d8ed73707286ab30d66",
     "packages": [
         {
-            "name": "davidhemphill/yjs-php",
-            "version": "dev-claude/yjs-php-laravel-daemon-8d55e4",
+            "name": "hemp/yjs",
+            "version": "dev-main",
             "dist": {
                 "type": "path",
                 "url": "../yjs-php",
-                "reference": "242f578ef1e8edf6b5cd51fa94a4af4e8cae2fd1"
+                "reference": "8e1c1f67aa8cdec3c6be68be8b297743543207fe"
             },
             "require": {
                 "php": "^8.4"
@@ -4277,7 +4277,7 @@
     "aliases": [],
     "minimum-stability": "stable",
     "stability-flags": {
-        "davidhemphill/yjs-php": 20
+        "hemp/yjs": 20
     },
     "prefer-stable": true,
     "prefer-lowest": false,

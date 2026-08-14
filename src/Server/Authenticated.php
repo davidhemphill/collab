@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace Hocuspocus\Server;
+namespace Collab\Server;
 
-use Hocuspocus\Protocol\Scope;
+use Collab\Protocol\Scope;
 
 /**
  * The outcome of a successful authentication.

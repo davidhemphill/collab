@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Hocuspocus\Server;
+namespace Collab\Server;
 
 use Yjs\Update\Update;
 

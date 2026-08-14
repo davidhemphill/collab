@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Hocuspocus\Protocol;
+namespace Collab\Protocol;
 
 /**
  * The three authentication shapes, and the one that is really two.

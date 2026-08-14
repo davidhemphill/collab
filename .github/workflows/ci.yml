@@ -21,13 +21,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          path: yjs-hocuspocus
+          path: collab
 
       # yjs-php is a path dependency until both packages are published, so it
       # has to sit beside this checkout for composer to resolve it.
       - uses: actions/checkout@v4
         with:
-          repository: davidhemphill/yjs-php
+          repository: ${{ github.repository_owner }}/yjs-php
           path: yjs-php
 
       - uses: shivammathur/setup-php@v2
@@ -38,14 +38,14 @@ jobs:
 
       - uses: ramsey/composer-install@v3
         with:
-          working-directory: yjs-hocuspocus
+          working-directory: collab
 
       - name: Check formatting
-        working-directory: yjs-hocuspocus
+        working-directory: collab
         run: vendor/bin/pint --test
 
       - name: Run the test suite
-        working-directory: yjs-hocuspocus
+        working-directory: collab
         run: vendor/bin/pest --colors=always
 
   transcripts:

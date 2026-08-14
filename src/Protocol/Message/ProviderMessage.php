@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace Hocuspocus\Protocol\Message;
+namespace Collab\Protocol\Message;
 
-use Hocuspocus\Protocol\AddressedFrame;
-use Hocuspocus\Protocol\MessageType;
+use Collab\Protocol\AddressedFrame;
+use Collab\Protocol\MessageType;
 use Yjs\Binary\Encoder;
 
 /**

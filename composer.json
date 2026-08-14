@@ -1,6 +1,6 @@
 {
-    "name": "davidhemphill/yjs-hocuspocus",
-    "description": "The Hocuspocus provider protocol in pure PHP, built on yjs-php.",
+    "name": "hemp/collab",
+    "description": "A pure-PHP Yjs collaboration server speaking the Hocuspocus provider protocol.",
     "type": "library",
     "license": "MIT",
     "keywords": [
@@ -12,7 +12,7 @@
     ],
     "require": {
         "php": "^8.4",
-        "davidhemphill/yjs-php": "@dev"
+        "hemp/yjs": "@dev"
     },
     "require-dev": {
         "laravel/pint": "^1.24",
@@ -29,12 +29,12 @@
     ],
     "autoload": {
         "psr-4": {
-            "Hocuspocus\\": "src/"
+            "Collab\\": "src/"
         }
     },
     "autoload-dev": {
         "psr-4": {
-            "Hocuspocus\\Tests\\": "tests/"
+            "Collab\\Tests\\": "tests/"
         }
     },
     "scripts": {

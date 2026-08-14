@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Hocuspocus\Protocol;
+namespace Collab\Protocol;
 
 /**
  * What an authenticated session is permitted to do.

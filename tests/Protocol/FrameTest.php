@@ -2,19 +2,19 @@
 
 declare(strict_types=1);
 
-use Hocuspocus\Protocol\AddressedFrame;
-use Hocuspocus\Protocol\AuthMessageType;
-use Hocuspocus\Protocol\CompatibilityProfile;
-use Hocuspocus\Protocol\FrameReader;
-use Hocuspocus\Protocol\Message\Authentication;
-use Hocuspocus\Protocol\Message\Awareness;
-use Hocuspocus\Protocol\Message\Close;
-use Hocuspocus\Protocol\Message\QueryAwareness;
-use Hocuspocus\Protocol\Message\Stateless;
-use Hocuspocus\Protocol\Message\SyncStatus;
-use Hocuspocus\Protocol\MessageType;
-use Hocuspocus\Protocol\Scope;
-use Hocuspocus\Tests\Support\Transcripts;
+use Collab\Protocol\AddressedFrame;
+use Collab\Protocol\AuthMessageType;
+use Collab\Protocol\CompatibilityProfile;
+use Collab\Protocol\FrameReader;
+use Collab\Protocol\Message\Authentication;
+use Collab\Protocol\Message\Awareness;
+use Collab\Protocol\Message\Close;
+use Collab\Protocol\Message\QueryAwareness;
+use Collab\Protocol\Message\Stateless;
+use Collab\Protocol\Message\SyncStatus;
+use Collab\Protocol\MessageType;
+use Collab\Protocol\Scope;
+use Collab\Tests\Support\Transcripts;
 use Yjs\Exception\DecodeException;
 use Yjs\Exception\MalformedInput;
 use Yjs\Protocol\Sync\SyncStep1;

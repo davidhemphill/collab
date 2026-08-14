@@ -2,16 +2,16 @@
 
 declare(strict_types=1);
 
-namespace Hocuspocus\Server;
+namespace Collab\Server;
 
-use Hocuspocus\Protocol\AddressedFrame;
-use Hocuspocus\Protocol\Message\Authentication;
-use Hocuspocus\Protocol\Message\Awareness;
-use Hocuspocus\Protocol\Message\ProviderMessage;
-use Hocuspocus\Protocol\Message\QueryAwareness;
-use Hocuspocus\Protocol\Message\Sync;
-use Hocuspocus\Protocol\Message\SyncStatus;
-use Hocuspocus\Protocol\Scope;
+use Collab\Protocol\AddressedFrame;
+use Collab\Protocol\Message\Authentication;
+use Collab\Protocol\Message\Awareness;
+use Collab\Protocol\Message\ProviderMessage;
+use Collab\Protocol\Message\QueryAwareness;
+use Collab\Protocol\Message\Sync;
+use Collab\Protocol\Message\SyncStatus;
+use Collab\Protocol\Scope;
 use Throwable;
 use Yjs\Protocol\Awareness\AwarenessStore;
 use Yjs\Protocol\Sync\ReadOnlyPolicy;

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Hocuspocus\Tests\Support;
+namespace Collab\Tests\Support;
 
 use RuntimeException;
 

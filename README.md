@@ -1,4 +1,4 @@
-# Collaboration server
+# collab
 
 A Yjs collaboration server for Laravel applications, speaking the Hocuspocus
 provider protocol, running entirely in PHP.
@@ -7,23 +7,22 @@ provider protocol, running entirely in PHP.
 > implemented and tested. The daemon that carries them — event loop, resident
 > documents, persistence — is not built yet.
 
-This repository currently also holds the Node sidecar it is meant to replace.
-Both live here during the transition; the Node process is still what runs in
-production, and it does not go away until the PHP path passes the production
-gate.
+The Node sidecar this is meant to replace lives in its own repository and is
+still what runs in production. It does not go away until the PHP path passes
+the production gate.
 
 ## What is here
 
 ```text
 src/Protocol/       the Hocuspocus provider frames
+src/Server/         the session state machine and its seams
 tools/oracle/       transcript generation, pinned to Profile 1
 fixtures/profile-1/ committed transcripts, so the PHP suite runs without Node
-src/server.ts       the Node sidecar, unchanged
 ```
 
 The Yjs binary format itself — updates, merging, diffing, sync and awareness
-codecs — lives in [yjs-php](../yjs-php) and is consumed as a dependency. That
-split is deliberate: yjs-php knows nothing about WebSockets, Laravel, or
+codecs — lives in [hemp/yjs](../yjs-php) and is consumed as a dependency. That
+split is deliberate: hemp/yjs knows nothing about WebSockets, Laravel, or
 Hocuspocus, and this package adds no CRDT logic of its own.
 
 ## The frame format
@@ -76,7 +75,7 @@ truncation and random corruption of every committed transcript.
 ## Development
 
 ```bash
-composer install                  # yjs-php is a path dependency of ../yjs-php
+composer install                  # hemp/yjs is a path dependency of ../yjs-php
 composer test
 
 npm --prefix tools/oracle ci      # only needed to touch the transcripts

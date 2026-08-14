@@ -2,16 +2,16 @@
 
 declare(strict_types=1);
 
-namespace Hocuspocus\Protocol;
+namespace Collab\Protocol;
 
-use Hocuspocus\Protocol\Message\Authentication;
-use Hocuspocus\Protocol\Message\Awareness;
-use Hocuspocus\Protocol\Message\Close;
-use Hocuspocus\Protocol\Message\ProviderMessage;
-use Hocuspocus\Protocol\Message\QueryAwareness;
-use Hocuspocus\Protocol\Message\Stateless;
-use Hocuspocus\Protocol\Message\Sync;
-use Hocuspocus\Protocol\Message\SyncStatus;
+use Collab\Protocol\Message\Authentication;
+use Collab\Protocol\Message\Awareness;
+use Collab\Protocol\Message\Close;
+use Collab\Protocol\Message\ProviderMessage;
+use Collab\Protocol\Message\QueryAwareness;
+use Collab\Protocol\Message\Stateless;
+use Collab\Protocol\Message\Sync;
+use Collab\Protocol\Message\SyncStatus;
 use Yjs\Binary\DecodeLimits;
 use Yjs\Binary\Decoder;
 use Yjs\Exception\DecodeException;
