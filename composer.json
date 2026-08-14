@@ -1,0 +1,62 @@
+{
+    "name": "davidhemphill/yjs-hocuspocus",
+    "description": "The Hocuspocus provider protocol in pure PHP, built on yjs-php.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "yjs",
+        "crdt",
+        "hocuspocus",
+        "collaboration",
+        "websocket"
+    ],
+    "require": {
+        "php": "^8.4",
+        "davidhemphill/yjs-php": "@dev"
+    },
+    "require-dev": {
+        "laravel/pint": "^1.24",
+        "pestphp/pest": "^4.3"
+    },
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../yjs-php",
+            "options": {
+                "symlink": true
+            }
+        }
+    ],
+    "autoload": {
+        "psr-4": {
+            "Hocuspocus\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Hocuspocus\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "lint": "pint --parallel",
+        "test:lint": "pint --parallel --test",
+        "test:unit": "pest",
+        "test": [
+            "@test:lint",
+            "@test:unit"
+        ],
+        "fixtures": "node tools/oracle/generate-transcripts.mjs"
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "suggest": {
+        "react/socket": "Required by the collaboration daemon, once it exists.",
+        "ratchet/rfc6455": "Required by the collaboration daemon, once it exists."
+    }
+}

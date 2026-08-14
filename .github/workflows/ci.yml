@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  php:
+    name: PHP ${{ matrix.php }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.4', '8.5']
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: yjs-hocuspocus
+
+      # yjs-php is a path dependency until both packages are published, so it
+      # has to sit beside this checkout for composer to resolve it.
+      - uses: actions/checkout@v4
+        with:
+          repository: davidhemphill/yjs-php
+          path: yjs-php
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: mbstring
+          coverage: none
+
+      - uses: ramsey/composer-install@v3
+        with:
+          working-directory: yjs-hocuspocus
+
+      - name: Check formatting
+        working-directory: yjs-hocuspocus
+        run: vendor/bin/pint --test
+
+      - name: Run the test suite
+        working-directory: yjs-hocuspocus
+        run: vendor/bin/pest --colors=always
+
+  transcripts:
+    name: Provider transcripts
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: tools/oracle/package-lock.json
+
+      - name: Install the pinned provider packages
+        run: npm --prefix tools/oracle ci
+
+      - name: Regenerate the transcripts
+        run: node tools/oracle/generate-transcripts.mjs
+
+      # Generation carries no timestamp, so any diff is a real change in what
+      # the provider protocol looks like.
+      - name: Fail if the committed transcripts moved
+        run: |
+          if ! git diff --exit-code --stat -- fixtures/; then
+            echo "::error::Regenerated transcripts differ from the committed ones. Review the diff and update the compatibility profile before committing."
+            exit 1
+          fi

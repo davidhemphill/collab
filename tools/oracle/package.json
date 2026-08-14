@@ -1,0 +1,17 @@
+{
+  "name": "collaboration-server-oracle",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Compatibility Profile 1 transcript generator. Development and CI only; never a runtime dependency of the PHP server.",
+  "scripts": {
+    "generate": "node generate-transcripts.mjs"
+  },
+  "dependencies": {
+    "@hocuspocus/common": "3.4.4",
+    "@hocuspocus/provider": "3.4.4",
+    "lib0": "0.2.117",
+    "y-protocols": "1.0.7",
+    "yjs": "13.6.29"
+  }
+}

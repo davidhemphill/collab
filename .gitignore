@@ -1,0 +1,5 @@
+/vendor
+/tools/oracle/node_modules
+/.phpunit.cache
+/.phpunit.result.cache
+.DS_Store

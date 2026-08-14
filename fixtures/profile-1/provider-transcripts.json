@@ -1,0 +1,143 @@
+{
+  "profile": 1,
+  "provenance": "Assembled from @hocuspocus/common, y-protocols, and lib0 following the frame construction in @hocuspocus/provider/src/OutgoingMessages/*.ts. Not captured from a running provider — see the note at the top of generate-transcripts.mjs.",
+  "document": "4711",
+  "token": "a-signed-jwt.with.parts",
+  "packages": {
+    "@hocuspocus/provider": "3.4.4",
+    "@hocuspocus/common": "3.4.4",
+    "yjs": "13.6.29",
+    "y-protocols": "1.0.7",
+    "lib0": "0.2.117"
+  },
+  "cases": [
+    {
+      "name": "auth-token",
+      "description": "The client presenting its token.",
+      "direction": "client-to-server",
+      "documentName": "4711",
+      "type": 2,
+      "bytes": "BDQ3MTECABdhLXNpZ25lZC1qd3Qud2l0aC5wYXJ0cw=="
+    },
+    {
+      "name": "sync-step1",
+      "description": "The client opening a sync.",
+      "direction": "client-to-server",
+      "documentName": "4711",
+      "type": 0,
+      "bytes": "BDQ3MTEAAAQBhAcX"
+    },
+    {
+      "name": "sync-step2",
+      "description": "The client answering our sync step one.",
+      "direction": "client-to-server",
+      "documentName": "4711",
+      "type": 0,
+      "bytes": "BDQ3MTEAAT0BAoQHAAQBBHRleHQYcHJvdmlkZXIgdHJhbnNjcmlwdCDwn5iAKAEEbWV0YQV0aXRsZQF3B0ZpeHR1cmUA"
+    },
+    {
+      "name": "sync-update",
+      "description": "The client broadcasting an edit.",
+      "direction": "client-to-server",
+      "documentName": "4711",
+      "type": 0,
+      "bytes": "BDQ3MTEAAj0BAoQHAAQBBHRleHQYcHJvdmlkZXIgdHJhbnNjcmlwdCDwn5iAKAEEbWV0YQV0aXRsZQF3B0ZpeHR1cmUA"
+    },
+    {
+      "name": "awareness",
+      "description": "The client announcing its presence.",
+      "direction": "client-to-server",
+      "documentName": "4711",
+      "type": 1,
+      "bytes": "BDQ3MTEBMgGEBwEteyJuYW1lIjoiQWRhIiwiY3Vyc29yIjp7ImFuY2hvciI6MSwiaGVhZCI6NH19"
+    },
+    {
+      "name": "query-awareness",
+      "description": "The client asking who else is here.",
+      "direction": "client-to-server",
+      "documentName": "4711",
+      "type": 3,
+      "bytes": "BDQ3MTED"
+    },
+    {
+      "name": "stateless",
+      "description": "An application-defined string.",
+      "direction": "client-to-server",
+      "documentName": "4711",
+      "type": 5,
+      "bytes": "BDQ3MTEFFXsia2luZCI6InBpbmciLCJuIjoxfQ=="
+    },
+    {
+      "name": "close",
+      "description": "The client leaving this document.",
+      "direction": "client-to-server",
+      "documentName": "4711",
+      "type": 7,
+      "bytes": "BDQ3MTEH"
+    },
+    {
+      "name": "auth-token-request",
+      "description": "The server asking for a token.",
+      "direction": "server-to-client",
+      "documentName": "4711",
+      "type": 2,
+      "bytes": "BDQ3MTECAA=="
+    },
+    {
+      "name": "auth-authenticated-readwrite",
+      "description": "The server granting write access.",
+      "direction": "server-to-client",
+      "documentName": "4711",
+      "type": 2,
+      "bytes": "BDQ3MTECAgpyZWFkLXdyaXRl"
+    },
+    {
+      "name": "auth-authenticated-readonly",
+      "description": "The server granting read-only access.",
+      "direction": "server-to-client",
+      "documentName": "4711",
+      "type": 2,
+      "bytes": "BDQ3MTECAghyZWFkb25seQ=="
+    },
+    {
+      "name": "auth-permission-denied",
+      "description": "The server refusing access.",
+      "direction": "server-to-client",
+      "documentName": "4711",
+      "type": 2,
+      "bytes": "BDQ3MTECAR9Zb3UgbWF5IG5vdCBvcGVuIHRoaXMgZG9jdW1lbnQu"
+    },
+    {
+      "name": "sync-status-accepted",
+      "description": "The server accepting an update.",
+      "direction": "server-to-client",
+      "documentName": "4711",
+      "type": 8,
+      "bytes": "BDQ3MTEIAQ=="
+    },
+    {
+      "name": "sync-status-rejected",
+      "description": "The server refusing an update.",
+      "direction": "server-to-client",
+      "documentName": "4711",
+      "type": 8,
+      "bytes": "BDQ3MTEIAA=="
+    },
+    {
+      "name": "awareness-broadcast",
+      "description": "The server relaying presence to everyone else.",
+      "direction": "server-to-client",
+      "documentName": "4711",
+      "type": 1,
+      "bytes": "BDQ3MTEBMgGEBwEteyJuYW1lIjoiQWRhIiwiY3Vyc29yIjp7ImFuY2hvciI6MSwiaGVhZCI6NH19"
+    },
+    {
+      "name": "sync-step1-from-server",
+      "description": "The server opening a sync.",
+      "direction": "server-to-client",
+      "documentName": "4711",
+      "type": 0,
+      "bytes": "BDQ3MTEAAAQBhAcX"
+    }
+  ]
+}
