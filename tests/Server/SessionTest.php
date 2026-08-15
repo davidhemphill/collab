@@ -3,7 +3,6 @@
 declare(strict_types=1);
 
 use Hemp\Collab\Protocol\AddressedFrame;
-use Hemp\Collab\Protocol\FrameReader;
 use Hemp\Collab\Protocol\Message\Authentication;
 use Hemp\Collab\Protocol\Message\Awareness;
 use Hemp\Collab\Protocol\Message\QueryAwareness;
@@ -11,17 +10,12 @@ use Hemp\Collab\Protocol\Message\Sync;
 use Hemp\Collab\Protocol\Message\SyncStatus;
 use Hemp\Collab\Protocol\Scope;
 use Hemp\Collab\Server\Authenticated;
-use Hemp\Collab\Server\AuthenticationFailed;
-use Hemp\Collab\Server\Authenticator;
-use Hemp\Collab\Server\DocumentStore;
 use Hemp\Collab\Server\Session;
-use Hemp\Collab\Tests\Support\Transcripts;
 use Hemp\Yjs\Id\StateVector;
 use Hemp\Yjs\Protocol\Awareness\AwarenessEntry;
 use Hemp\Yjs\Protocol\Awareness\AwarenessUpdate;
 use Hemp\Yjs\Protocol\Sync\SyncStep1;
 use Hemp\Yjs\Protocol\Sync\SyncStep2;
-use Hemp\Yjs\Update\Update;
 
 /**
  * The session state machine, driven with no framework underneath it.
@@ -31,54 +25,6 @@ use Hemp\Yjs\Update\Update;
  * protocol logic is exercised here and the host application's policy is
  * exercised where that policy lives.
  */
-
-/** An authenticator that accepts one token and grants a fixed scope. */
-function authenticatorGranting(Scope $scope, string $token = 'good'): Authenticator
-{
-    return new class($scope, $token) implements Authenticator
-    {
-        public function __construct(private Scope $scope, private string $token) {}
-
-        public function authenticate(string $documentName, string $token): Authenticated
-        {
-            if ($token !== $this->token) {
-                throw AuthenticationFailed::invalidToken();
-            }
-
-            return new Authenticated($this->scope, identity: "user-for-{$documentName}");
-        }
-    };
-}
-
-/** A store that keeps documents in memory. */
-function memoryStore(): DocumentStore
-{
-    return new class implements DocumentStore
-    {
-        /** @var array<string, Update> */
-        public array $documents = [];
-
-        public function load(string $documentName): Update
-        {
-            return $this->documents[$documentName] ?? Update::empty();
-        }
-
-        public function store(string $documentName, Update $update): void
-        {
-            $this->documents[$documentName] = $update;
-        }
-    };
-}
-
-function seeded(): Update
-{
-    // A real update, taken from the frame this package records the provider
-    // sending. Hand-built bytes would only prove this agrees with itself.
-    $frame = (new FrameReader)->read(Transcripts::bytes('sync-update'));
-
-    return $frame->message->message->update();
-}
-
 function open(Session $session, string $document = '4711', string $token = 'good'): array
 {
     return $session->receive(new AddressedFrame($document, Authentication::token($token)));

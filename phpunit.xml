@@ -14,6 +14,9 @@
         <testsuite name="Server">
             <directory>tests/Server</directory>
         </testsuite>
+        <testsuite name="Laravel">
+            <directory>tests/Laravel</directory>
+        </testsuite>
     </testsuites>
     <source>
         <include>

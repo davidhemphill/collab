@@ -13,6 +13,7 @@ use Hemp\Collab\Protocol\Message\Sync;
 use Hemp\Collab\Protocol\Message\SyncStatus;
 use Hemp\Collab\Protocol\Scope;
 use Hemp\Yjs\Protocol\Awareness\AwarenessStore;
+use Hemp\Yjs\Protocol\Awareness\AwarenessUpdate;
 use Hemp\Yjs\Protocol\Sync\ReadOnlyPolicy;
 use Hemp\Yjs\Protocol\Sync\SyncAdmission;
 use Hemp\Yjs\Protocol\Sync\SyncStep1;
@@ -216,6 +217,21 @@ final class Session
         // Nothing goes back to the sender. Fanning this out to the document's
         // other connections is the daemon's job, not the session's.
         return [];
+    }
+
+    /**
+     * Withdraw presence this connection introduced, for the hub to relay when
+     * the socket goes away.
+     *
+     * @param  list<int>  $clients
+     */
+    public function retract(array $clients): AwarenessUpdate
+    {
+        $removal = $this->awareness->removalFor($clients);
+        $this->awareness->forget($clients);
+        $this->ownedClients = [];
+
+        return $removal;
     }
 
     /**
