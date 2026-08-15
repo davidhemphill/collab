@@ -1,40 +1,83 @@
 # collab
 
-A Yjs collaboration server for Laravel applications, speaking the Hocuspocus
-provider protocol, running entirely in PHP.
+Add real-time collaborative editing to a Laravel application. No Node.js server.
 
-An unmodified `@hocuspocus/provider` in the browser connects to `collab:start`
-in your Laravel application. There is no Node process in the path.
+Two persons open the same page. Each person sees the changes of the other person
+immediately. Each person sees the cursor of the other person. Nobody overwrites
+the work of anybody else.
 
-> **Status: not in production anywhere.** The protocol, the session state
-> machine, the daemon and the Laravel wiring are built and tested. What is
-> missing is listed under [Not built yet](#not-built-yet) — most importantly
-> debounced persistence and a handshake test against a real provider. Do not
-> put this in front of documents you cannot afford to lose.
+Google Docs works like this. This package gives your Laravel application the
+same behavior.
+
+> **Do not use this in production yet.** The code works and the tests pass, but
+> the package is new and no application uses it yet. Read
+> [Limits of this version](#limits-of-this-version) before you start.
 
 ---
 
 ## Contents
 
-- [Installation](#installation)
+- [What you get](#what-you-get)
+- [Before you start](#before-you-start)
 - [Quick start](#quick-start)
-- [The two seams](#the-two-seams)
-- [Configuration](#configuration)
-- [Running the daemon](#running-the-daemon)
-- [Deployment](#deployment)
-- [Connecting a client](#connecting-a-client)
-- [Architecture](#architecture)
-- [The frame format](#the-frame-format)
-- [Limits and untrusted input](#limits-and-untrusted-input)
-- [Testing](#testing)
-- [Compatibility](#compatibility)
-- [Not built yet](#not-built-yet)
+- [Definitions](#definitions)
+- [How the parts fit together](#how-the-parts-fit-together)
+- [The two classes you write](#the-two-classes-you-write)
+- [Settings](#settings)
+- [How to start the server](#how-to-start-the-server)
+- [How to install the server on a production machine](#how-to-install-the-server-on-a-production-machine)
+- [Questions and answers](#questions-and-answers)
+- [Limits of this version](#limits-of-this-version)
+- [How to run the tests](#how-to-run-the-tests)
 
 ---
 
-## Installation
+## What you get
 
-Not on Packagist yet. Add the repository explicitly:
+You get these results:
+
+- Two or more persons edit the same document at the same time.
+- Each person sees the changes of the other persons in less than a second.
+- Each person sees the name and the cursor of each other person.
+- A person who loses the network connection keeps the work. The browser sends
+  the work again when the connection comes back.
+- A person with read-only permission cannot change the document.
+- The document stays in your database, in a column that you control.
+
+You do this work:
+
+- You write two small PHP classes. One class says who can open a document. The
+  other class says where to keep the document.
+- You start one more process next to your web server.
+
+You do **not** do this work:
+
+- You do not write merge code. The browser and the server agree automatically.
+- You do not install Node.js on the server.
+- You do not change the JavaScript editor code.
+
+## Before you start
+
+You need these things:
+
+| Item | Version |
+|---|---|
+| PHP | 8.4 or later, on a 64-bit machine |
+| Laravel | 11 or 12 |
+| A JavaScript editor with Yjs support | Tiptap, BlockNote, ProseMirror, Quill, Monaco, CodeMirror, or Slate |
+| A machine that can run a process that does not stop | A virtual server, a container, or a dedicated machine |
+
+Shared hosting is not sufficient. The server must run all the time. See
+[Questions and answers](#questions-and-answers).
+
+## Quick start
+
+Follow these five steps. The full explanation of each step comes after.
+
+### Step 1: Install the package
+
+The package is not on Packagist yet. Add the two repositories to your
+`composer.json` file:
 
 ```json
 {
@@ -45,133 +88,286 @@ Not on Packagist yet. Add the repository explicitly:
 }
 ```
 
+Then install the package:
+
 ```bash
 composer require hemp/collab:@dev
 ```
 
-Both repositories are needed: `hemp/collab` depends on
-[`hemp/yjs`](https://github.com/davidhemphill/yjs-php), which is where the Yjs
-binary format lives and which is likewise unreleased.
+Laravel finds the package automatically. You do not register anything.
 
-Requires **PHP 8.4** on a **64-bit** platform, and Laravel 11 or 12. The service
-provider is discovered automatically.
+### Step 2: Add a column for the document
 
-Publish the config if you want to edit it in your application:
+The document is a block of bytes. Keep it in a binary column.
 
 ```bash
-php artisan vendor:publish --tag=collab-config
+php artisan make:migration add_collab_state_to_documents_table
 ```
 
-## Quick start
+```php
+Schema::table('documents', function (Blueprint $table) {
+    $table->binary('collab_state')->nullable();
+});
+```
 
-Three steps: say who may open a document, say where documents live, then start
-the server.
+Run the migration:
 
-**1. Implement the two seams** (detailed [below](#the-two-seams)):
+```bash
+php artisan migrate
+```
+
+### Step 3: Write the class that says who can open a document
+
+Create `app/Collaboration/DocumentAuthenticator.php`:
 
 ```php
 namespace App\Collaboration;
 
+use App\Models\Document;
+use App\Models\User;
 use Hemp\Collab\Protocol\Scope;
-use Hemp\Collab\Server\{Authenticated, AuthenticationFailed, Authenticator};
+use Hemp\Collab\Server\Authenticated;
+use Hemp\Collab\Server\AuthenticationFailed;
+use Hemp\Collab\Server\Authenticator;
 
 class DocumentAuthenticator implements Authenticator
 {
     public function authenticate(string $documentName, string $token): Authenticated
     {
-        $claims = JWT::decode($token, ...) ?: throw AuthenticationFailed::invalidToken();
+        // $token is the value that the browser sends. Do not trust it.
+        // This example uses a signed value from your own application.
+        $user = User::find(decrypt($token));
 
-        // The token and the address have to agree, or a valid token for one
-        // document opens every other one.
-        if ((string) $claims->document_id !== $documentName) {
+        if ($user === null) {
+            throw AuthenticationFailed::invalidToken();
+        }
+
+        $document = Document::find($documentName);
+
+        if ($document === null || ! $user->can('view', $document)) {
             throw AuthenticationFailed::documentMismatch();
         }
 
         return new Authenticated(
-            $claims->may_edit ? Scope::ReadWrite : Scope::ReadOnly,
-            identity: $claims->user_id,
+            $user->can('update', $document) ? Scope::ReadWrite : Scope::ReadOnly,
+            identity: $user->id,
         );
     }
 }
 ```
 
-**2. Point config at them**, in `config/collab.php` or `.env`:
+### Step 4: Write the class that says where to keep the document
+
+Create `app/Collaboration/DocumentStore.php`:
 
 ```php
-'authenticator' => App\Collaboration\DocumentAuthenticator::class,
-'store' => App\Collaboration\EloquentDocumentStore::class,
+namespace App\Collaboration;
+
+use App\Models\Document;
+use Hemp\Collab\Server\DocumentStore as DocumentStoreContract;
+use Hemp\Yjs\Update\Update;
+
+class DocumentStore implements DocumentStoreContract
+{
+    public function load(string $documentName): Update
+    {
+        $bytes = Document::query()->whereKey($documentName)->value('collab_state');
+
+        if ($bytes === null) {
+            return Update::empty();
+        }
+
+        return Update::decode($bytes);
+    }
+
+    public function store(string $documentName, Update $update): void
+    {
+        Document::query()->whereKey($documentName)->update([
+            'collab_state' => $update->encode(),
+        ]);
+    }
+}
 ```
 
-**3. Run it**:
+Add the two classes to your `.env` file:
+
+```env
+COLLAB_AUTHENTICATOR="App\Collaboration\DocumentAuthenticator"
+COLLAB_STORE="App\Collaboration\DocumentStore"
+```
+
+### Step 5: Start the server and connect the browser
+
+Start the server in a terminal:
 
 ```bash
 php artisan collab:start
 ```
 
-## The two seams
+Connect the browser to it:
 
-This package holds no application policy. It reaches yours through exactly two
-interfaces, and knows nothing else about your application — not what a user is,
-not what a document is, not where either is stored.
+```js
+import { HocuspocusProvider } from '@hocuspocus/provider'
 
-Both are resolved from the container, so constructor injection works normally.
+const provider = new HocuspocusProvider({
+  url: 'ws://127.0.0.1:1234',
+  name: String(documentId),   // becomes $documentName in step 3
+  token: userToken,           // becomes $token in step 3
+  document: ydoc,             // the Yjs document of your editor
+})
+```
 
-### `Authenticator` — who may open this document, and how
+Open the page in two browser windows. Type in one window. The text appears in
+the other window.
+
+## Definitions
+
+Read this section if a word in this document is new to you.
+
+**Collaborative editing**
+Two or more persons change the same document at the same time. Each person sees
+the changes of the other persons.
+
+**Yjs**
+A JavaScript library. Yjs holds a document in the browser and merges changes
+from different persons. Two browsers with the same changes always show the same
+result, in any order. You do not write merge code, because Yjs does it.
+
+**Update**
+A small block of bytes from Yjs. An update holds one change or many changes. You
+put updates together to make the full document. You do not read the bytes.
+
+**Document**
+The text and the format data that the persons edit together. In this package a
+document is one `Update`.
+
+**Document name**
+The text that identifies one document. The browser sends this text. You choose
+the value. A database ID is a good value.
+
+**Hocuspocus**
+A collaboration server for Yjs, written in JavaScript. Hocuspocus has a browser
+part and a server part. This package replaces the server part. The browser part
+does not change.
+
+**Provider**
+The browser part of Hocuspocus. The provider connects to the server, sends the
+changes of this person, and receives the changes of the other persons. The name
+of the JavaScript package is `@hocuspocus/provider`.
+
+**WebSocket**
+A connection between a browser and a server that stays open. Both sides send
+data at any time. A usual HTTP request is not sufficient, because the server
+must speak first when another person makes a change.
+
+**Awareness**
+The data that is not part of the document, but that the other persons must see.
+The cursor position and the name of a person are awareness data. Awareness data
+is not kept. It goes away when the person closes the page.
+
+**Token**
+A text that the browser sends to prove who the person is. You make the token in
+your Laravel application. You read the token in your `Authenticator` class. This
+package does not look inside the token.
+
+**Scope**
+The permission of one person for one document. There are two values:
+`Scope::ReadWrite` and `Scope::ReadOnly`.
+
+**The server**
+The PHP process that `php artisan collab:start` starts. It stays open, it holds
+the connections of all the persons, and it sends each change to the other
+persons.
+
+**Reverse proxy**
+A web server, for example nginx, in front of your application. It receives the
+requests from the internet and sends them to your application. It also does the
+encryption (HTTPS and WSS).
+
+## How the parts fit together
+
+```text
+Browser (Person A)  ─┐
+                     ├─ WebSocket ─→  collab:start  ─→  your DocumentStore  ─→  Database
+Browser (Person B)  ─┘                     │
+                                           └─→ your Authenticator
+```
+
+The sequence for one change:
+
+1. Person A types a letter. Yjs in the browser makes an update.
+2. The provider sends the update to the server.
+3. The server asks your `Authenticator` if person A can write. It asks one time
+   for each document, not one time for each change.
+4. The server reads the document with your `DocumentStore`, adds the update, and
+   writes the document again.
+5. The server tells person A that the change is safe.
+6. The server sends the update to person B.
+7. Yjs in the browser of person B adds the update. The letter appears.
+
+Two rules keep this correct:
+
+- If the server refuses a change, no other person receives it. A person with
+  read-only permission cannot send changes to the other persons.
+- If a person closes the page, the server tells the other persons to remove that
+  cursor.
+
+## The two classes you write
+
+This package holds no rules of your application. It knows nothing about your
+users, your documents, or your database. It asks your code two questions, one
+question for each class.
+
+### Authenticator: who can open this document?
 
 ```php
-namespace Hemp\Collab\Server;
-
 interface Authenticator
 {
     public function authenticate(string $documentName, string $token): Authenticated;
 }
 ```
 
-`$documentName` is the address the client put on the frame. `$token` is whatever
-the client sent — treat it as hostile.
+The server calls this method one time for each document, when the browser first
+asks for that document.
 
-Return an `Authenticated`:
+To accept the person, return an `Authenticated` object:
 
 ```php
 new Authenticated(
     scope: Scope::ReadWrite,   // or Scope::ReadOnly
-    identity: $user->id,       // opaque to this package; yours to use in logs and events
+    identity: $user->id,       // any value; this package does not read it
 );
 ```
 
-Refuse by throwing `AuthenticationFailed`. **The message is sent to the client
-verbatim**, so it must be safe to say out loud:
+To refuse the person, throw an `AuthenticationFailed` exception:
 
-| Constructor | Message |
+| Method | Text sent to the browser |
 |---|---|
 | `AuthenticationFailed::invalidToken()` | `Invalid token.` |
 | `AuthenticationFailed::documentMismatch()` | `Token does not match document.` |
-| `AuthenticationFailed::because($reason)` | your string |
+| `AuthenticationFailed::because('...')` | your text |
 
-Prefer a message that does not distinguish an expired token from a forged one.
-Telling an unauthenticated caller which of the two it holds is more than it has
-earned; that detail belongs in your log.
+**Warning:** the browser receives this text. Do not put private data in it. Also
+use the same text for a token that is too old and for a token that is false. If
+the two texts are different, a person who attacks your application learns which
+tokens are real.
 
-Two things worth knowing:
+Three rules to remember:
 
-- **Authentication is per document, not per connection.** A provider
-  multiplexes every open document over one socket, and each gets its own
-  session with its own scope. Authenticating for one grants nothing for
-  another.
-- **`Scope::ReadOnly` is the only write boundary that holds.** A read-only
-  client's updates are refused and — importantly — never relayed to anyone
-  else. Anything finer-grained than "may write this document" is a browser
-  affordance, not an authorization boundary: it does not survive a modified
-  client, which can send any update the protocol allows. Never put state in a
-  Yjs document that some connected client must not be able to rewrite.
+- The browser can open many documents on one connection. Each document has its
+  own permission. Permission for one document gives no permission for another
+  document.
+- `Scope::ReadOnly` is the only rule that always holds. A person with
+  `Scope::ReadWrite` can send any change, because the JavaScript in the browser
+  is not under your control. If you hide a button, you change what the person
+  sees, not what the person can do.
+- Because of the rule above, do not put data in the document if a person with
+  write permission must not change that data. Keep such data in your database
+  and control it with your usual Laravel code.
 
-### `DocumentStore` — where a document's state lives
+### DocumentStore: where does the document stay?
 
 ```php
-namespace Hemp\Collab\Server;
-
-use Hemp\Yjs\Update\Update;
-
 interface DocumentStore
 {
     public function load(string $documentName): Update;
@@ -180,79 +376,66 @@ interface DocumentStore
 }
 ```
 
-An `Update` is the Yjs binary update from `hemp/yjs`. `Update::decode($bytes)`
-and `$update->encode()` move between it and a blob you can put in a column;
-`Update::empty()` is a document that does not exist yet, which is a normal
-return rather than an error.
+`Update::decode($bytes)` makes an `Update` from the bytes in your column.
+`$update->encode()` makes the bytes again. `Update::empty()` is a new document.
+A document that does not exist is normal, not an error.
 
-```php
-class EloquentDocumentStore implements DocumentStore
-{
-    public function load(string $documentName): Update
-    {
-        // Read fresh every time. A session holds its connection for as long as
-        // the client is present, so by the time a second update arrives another
-        // writer may have moved the document on — and merging onto stale state
-        // silently discards everything written in between.
-        $bytes = Document::query()->whereKey($documentName)->value('content_yjs');
+Two rules to remember:
 
-        return $bytes ? Update::decode($bytes, DecodeLimits::trusted()) : Update::empty();
-    }
+- **`load()` must read the database each time.** Do not keep the value in a
+  variable for the life of the connection. Another person can change the
+  document between two calls. If you use an old value, you lose the work of that
+  person.
+- **`store()` must complete before the person is safe.** The server tells the
+  browser that the change is safe only after `store()` returns. If `store()`
+  throws an exception, the server does not send that message, and the browser
+  keeps the change and sends it again.
 
-    public function store(string $documentName, Update $update): void
-    {
-        Document::query()->whereKey($documentName)->update(['content_yjs' => $update->encode()]);
-    }
-}
+## Settings
+
+The settings file is `config/collab.php`. To change it, copy it to your
+application first:
+
+```bash
+php artisan vendor:publish --tag=collab-config
 ```
 
-Two properties this package relies on:
-
-- **`load()` must return current state.** The comment above is not decoration —
-  caching the row for the life of a session loses concurrent edits.
-- **`store()` is on the acknowledgement path.** The client is told its update
-  was accepted only after `store()` returns, so a client that hears "accepted"
-  can stop holding the update. If `store()` throws, the acknowledgement is not
-  sent. Today it is called on **every** accepted update; see
-  [Not built yet](#not-built-yet).
-
-If you would rather bind the seams yourself than name them in config, bind the
-interfaces in a service provider and leave the config keys empty:
-
-```php
-$this->app->bind(Authenticator::class, DocumentAuthenticator::class);
-```
-
-## Configuration
-
-`config/collab.php`, publishable with `--tag=collab-config`.
-
-| Key | Env | Default | Meaning |
+| Setting | Environment variable | Default | Function |
 |---|---|---|---|
-| `host` | `COLLAB_HOST` | `127.0.0.1` | Address to bind |
-| `port` | `COLLAB_PORT` | `1234` | Port to bind |
-| `authenticator` | `COLLAB_AUTHENTICATOR` | — | Class implementing `Authenticator` |
-| `store` | `COLLAB_STORE` | — | Class implementing `DocumentStore` |
-| `limits.frame_bytes` | `COLLAB_MAX_FRAME_BYTES` | 16 MiB | Largest single WebSocket frame |
-| `limits.awareness_clients` | `COLLAB_MAX_AWARENESS_CLIENTS` | 512 | Cursors one awareness update may carry |
-| `limits.awareness_state_bytes` | `COLLAB_MAX_AWARENESS_STATE_BYTES` | 64 KiB | Largest single client's awareness state |
+| `host` | `COLLAB_HOST` | `127.0.0.1` | The address of the server |
+| `port` | `COLLAB_PORT` | `1234` | The port of the server |
+| `authenticator` | `COLLAB_AUTHENTICATOR` | none | Your `Authenticator` class |
+| `store` | `COLLAB_STORE` | none | Your `DocumentStore` class |
+| `limits.frame_bytes` | `COLLAB_MAX_FRAME_BYTES` | 16 MB | The largest message from a browser |
+| `limits.awareness_clients` | `COLLAB_MAX_AWARENESS_CLIENTS` | 512 | The largest number of cursors in one message |
+| `limits.awareness_state_bytes` | `COLLAB_MAX_AWARENESS_STATE_BYTES` | 64 KB | The largest cursor data for one person |
 
-The default bind address is deliberately **localhost**. A collaboration server
-reachable from the internet without a proxy in front of it is almost never what
-was intended.
+The default address is `127.0.0.1`. Only your own machine can connect to that
+address. This is correct for almost all applications, because a reverse proxy
+sends the connections to the server. See
+[How to install the server on a production machine](#how-to-install-the-server-on-a-production-machine).
 
-Leaving `authenticator` or `store` unset fails at resolution with a message
-naming the key — not with a container error about an interface you have never
-heard of.
+The three limits protect the server. A browser can send a message before the
+server knows who the person is, so the server must refuse a message that is too
+large. If a browser goes past a limit, the server closes that one connection.
+The server and all the other persons continue.
 
-## Running the daemon
+If you do not set `authenticator` or `store`, the server stops with a message
+that gives the name of the setting.
+
+## How to start the server
 
 ```bash
 php artisan collab:start
+```
+
+To use a different address or port:
+
+```bash
 php artisan collab:start --host=0.0.0.0 --port=4000
 ```
 
-Options override config; config falls back to the defaults above.
+The command shows this text:
 
 ```text
   INFO  Collaboration server listening on tcp://127.0.0.1:1234
@@ -260,20 +443,18 @@ Options override config; config falls back to the defaults above.
   Compatibility ... Profile 1: @hocuspocus/provider 3.4.4, yjs 13.6.29, …
 ```
 
-`SIGINT` and `SIGTERM` stop accepting new connections and let in-flight work
-drain before the process exits.
+To stop the server, press `Ctrl+C`. The server stops new connections first, then
+completes the work that is in progress.
 
-This is a long-running process. It does not reload your code between requests,
-so **restart it on deploy**.
+**Important:** this process reads your PHP code one time, at the start. If you
+change your code, stop the server and start it again. Add this step to your
+deployment procedure.
 
-It is also single-process and holds all state in memory, so **you cannot run
-two of them behind a load balancer** — two clients on different instances would
-never see each other. One process per document set, until the multi-node work
-in [Not built yet](#not-built-yet) lands.
+## How to install the server on a production machine
 
-## Deployment
+### Keep the process alive
 
-Supervisor:
+Use Supervisor to start the server again if it stops:
 
 ```ini
 [program:collab]
@@ -284,11 +465,13 @@ user=www-data
 stopwaitsecs=10
 ```
 
-`stopwaitsecs` should exceed your drain time so supervisor does not `SIGKILL`
-a server that was shutting down cleanly.
+Set `stopwaitsecs` to a value that is more than the time to stop. If the value
+is too small, Supervisor kills a server that is still busy.
 
-The daemon speaks plain WebSocket and terminates no TLS. Put a reverse proxy in
-front of it:
+### Add encryption
+
+The server speaks WebSocket, but it does no encryption. Put nginx in front of
+it:
 
 ```nginx
 location /collab {
@@ -297,196 +480,169 @@ location /collab {
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
 
-    # Editing sessions idle for long stretches. The default 60s read timeout
-    # will hang up on a user who stepped away mid-document.
+    # A person can look at a document for a long time and type nothing.
+    # The default limit of 60 seconds closes that connection.
     proxy_read_timeout 3600s;
 }
 ```
 
-It coexists with Laravel Reverb. The two share your container but not a wire
-protocol, a connection registry, or a failure domain — this package imports
-nothing from Reverb, and neither one restarting affects the other. They do need
-different ports.
-
-## Connecting a client
-
-Nothing special on the client. An unmodified provider:
+Then use `wss://` in the browser:
 
 ```js
-import { HocuspocusProvider } from '@hocuspocus/provider'
-
-const provider = new HocuspocusProvider({
-  url: 'wss://example.com/collab',
-  name: String(documentId),   // becomes $documentName in your Authenticator
-  token: collaborationToken,  // becomes $token
-  document: ydoc,
-})
+url: 'wss://example.com/collab'
 ```
 
-The request path is ignored — the document name comes from the frame, not the
-URL — so route the proxy wherever suits you.
+### Use one server only
 
-Use **provider 3.x**. See [Compatibility](#compatibility).
+You cannot run two of these servers behind a load balancer. The server keeps all
+the connections in its memory. Two persons on two different servers cannot see
+each other.
 
-## Architecture
+One server is sufficient for many documents and many persons. If you need more
+than one machine, this package is not ready for you yet.
 
-```text
-src/Protocol/       the Hocuspocus provider frames
-src/Server/         the session state machine, routing, and the daemon
-src/Laravel/        the service provider, collab:start, publishable config
-tools/oracle/       transcript generation, pinned to Profile 1
-fixtures/profile-1/ committed transcripts, so the PHP suite runs without Node
-```
+## Questions and answers
 
-The Yjs binary format itself — updates, merging, diffing, sync and awareness
-codecs — lives in [`hemp/yjs`](https://github.com/davidhemphill/yjs-php) and is
-consumed as a dependency. That split is deliberate: `hemp/yjs` knows nothing
-about WebSockets, Laravel, or Hocuspocus, and this package adds no CRDT logic
-of its own.
+### Which editors work with this package?
 
-Inside `src/Server/`, each layer knows less than the one above it:
+Any JavaScript editor that supports Yjs. This includes Tiptap, BlockNote,
+ProseMirror, Quill, Monaco, CodeMirror, and Slate. The editor gives you a Yjs
+document. You give that document to the provider.
 
-| | Holds | Knows about |
-|---|---|---|
-| `SocketServer` | the event loop and WebSocket framing | sockets |
-| `Hub` | connections, subscriptions, broadcast | frames as strings |
-| `Connection` | one client's sockets and its per-document sessions | its send closure |
-| `Session` | authentication, authorization, merge | your two interfaces |
+### Must I change my JavaScript code?
 
-Only `SocketServer` touches the network. `Connection` takes its `send` and
-`disconnect` as closures rather than a socket, so routing and broadcast are
-exercised in tests without opening a port — and the daemon stays thin enough
-that everything it does is moving bytes.
+No. Use the usual `@hocuspocus/provider` package. Change only the `url` value.
 
-Two rules in `Hub` are worth stating outright, because both are invisible until
-they are wrong:
+### Do I need Node.js?
 
-- **Only updates the session accepted are relayed.** An update refused for any
-  reason must reach nobody, or a read-only client could broadcast through a
-  server that declined to store what it sent.
-- **A departing connection retracts only the awareness clients it introduced.**
-  Otherwise one client leaving evicts another from the cursor list.
+No. Node.js is necessary only to develop this package, not to use it.
 
-## The frame format
+### Does this replace Laravel Reverb, Pusher, or Echo?
 
-Every WebSocket frame is one message, addressed to a document:
+No. They do different work.
 
-```text
-varString  document name
-varUint    message type
-...        payload, per type
-```
+Reverb, Pusher, and Echo send events to many browsers. Example: "a new comment
+is here". Each browser then does something. They do not merge text.
 
-A provider multiplexes every document it has open over one socket, so the
-address is the only thing that says which resident document a message belongs
-to.
+This package merges text. Two persons type in the same line at the same time and
+both changes stay. Reverb cannot do this.
 
-| Type | Message | Carries |
-|---:|---|---|
-| 0 | Sync | a y-protocols sync message |
-| 1 | Awareness | a y-protocols awareness update |
-| 2 | Auth | a token request, a token, a refusal, or a granted scope |
-| 3 | QueryAwareness | nothing |
-| 5 | Stateless | an application-defined string |
-| 7 | Close | nothing |
-| 8 | SyncStatus | whether the last update was accepted |
+You can use both in the same application. Give them different ports.
 
-4 and 6 are unassigned. The reader rejects them rather than assuming the
-numbering is dense, since a later provider version could fill them in.
+### Do I need Redis?
 
-### Two details that are easy to get wrong
+No.
 
-**`Auth` type 0 means two different things.** From the server it is a bare
-request — "send me your token" — with nothing after it. From the client it is
-the answer, with the token appended. Only the presence of a payload separates
-them, which is sound because a frame carries exactly one message.
+### Can I use shared hosting?
 
-**`SyncStatus` carries a *signed* varInt.** The provider reads it with
-`readVarInt`. Writing it unsigned produces identical bytes for 0 and 1, so the
-mistake would hold until it didn't.
+No. The server must run all the time and keep connections open. Shared hosting
+usually stops a PHP process after some seconds. Use a virtual server, a
+container, or a platform that runs worker processes.
 
-## Limits and untrusted input
+### What happens if the server stops?
 
-`FrameReader` is the outermost surface facing the network, and every frame
-reaching it may come from a socket that has not authenticated yet. It inherits
-`hemp/yjs`'s bounded decoder: declared lengths are checked before anything is
-allocated, and every failure is a typed `Hemp\Yjs\Exception\DecodeException` a
-connection handler can catch in one place. The suite asserts that over every
-truncation and random corruption of every committed transcript.
+The browsers lose the connection. Each person keeps their work in the browser
+page. The provider connects again automatically and sends the work again. The
+length of the stop does not matter.
 
-The frame size limit is enforced *before* the payload is buffered, not after, so
-a client announcing a huge frame is cut off rather than allocated for. A client
-that violates a limit or sends an undecodable frame is disconnected on its own;
-the daemon and every other session survive it. There is a test for exactly that,
-because the failure mode — one stranger ending everyone else's editing session
-— is not one you want to discover in production.
+But the work is in the page. If a person closes the tab while the server is
+down, the work of that person goes away. Tell your persons not to close the tab
+if they see a "not connected" message.
 
-A frame that fails to decode closes the connection rather than being skipped:
-the reader consumes a whole frame or nothing, so a failure means the client's
-framing is lost and everything after it is guesswork.
+### How do I make a document read-only for one person?
 
-## Testing
+Return `Scope::ReadOnly` from your `Authenticator`. The server refuses the
+changes from that person and sends them to nobody.
 
-```bash
-composer install    # hemp/yjs resolves from ../yjs-php as a path repository
-composer test       # pint --test, then pest
-```
+### How do I stop a person from opening a document?
 
-The shipped suite runs without Node. Three groups, each proving something the
-others cannot:
+Throw `AuthenticationFailed` from your `Authenticator`. The server closes the
+connection for that document.
 
-| Suite | What it runs against |
+### Can I let a person add comments but not change the text?
+
+Not with the scope values. There are two values only: read-write and read-only.
+
+If you hide the editing buttons, that is a change to what the person sees. It is
+not a rule. A person who writes their own JavaScript can send any change.
+
+For a real rule, keep the comments in your database and use your usual Laravel
+permissions.
+
+### How large can a document be?
+
+The default limit for one message is 16 MB. A document of usual text is much
+smaller. A document grows when persons edit it, also when they delete text,
+because Yjs keeps a record of the deletions.
+
+### The browser does not connect. What must I do?
+
+Look at these items in this order:
+
+1. Is the server running? Look for the `INFO` line.
+2. Is the port correct in the browser and in the settings?
+3. Does the page use HTTPS? Then the browser needs `wss://`, not `ws://`. A
+   browser refuses a `ws://` connection from an HTTPS page.
+4. Is a reverse proxy in front of the server? Then it needs the two `proxy_set_header`
+   lines that this document shows.
+5. Does your `Authenticator` throw an exception? Look in the browser console for
+   the refusal text.
+
+### Can I use a different database, or a file, or S3?
+
+Yes. The server calls only `load()` and `store()` in your class. Put the bytes
+where you want.
+
+### How do I test my two classes?
+
+Test them as usual Laravel classes. Call `authenticate()` with a token and look
+at the scope that it returns. Call `store()` and then `load()` and compare. You
+do not need a server for these tests.
+
+### Does the package send events to Laravel?
+
+Not yet. The `identity` value that you return from your `Authenticator` is
+available to the package, but the package raises no events with it now.
+
+### Why must the token be sent for each document?
+
+The browser uses one connection for all the documents that a person opens. If
+one token opened all of them, a person with permission for one document could
+open every other document.
+
+## Limits of this version
+
+Read this list before you use the package for real documents.
+
+| Limit | Result |
 |---|---|
-| `tests/Protocol` | committed transcripts, byte for byte |
-| `tests/Server` | the session and hub with no framework, plus the daemon over a real port |
-| `tests/Laravel` | a Testbench application, including `collab:start` serving real WebSocket clients |
+| The document is written for each change | Many writes to the database while a person types. This is correct but not fast. |
+| One process only | You cannot use two servers behind a load balancer. |
+| A slow browser has no limit | A browser that receives data slowly uses memory on the server. |
+| No test with a real provider yet | The tests use messages that are built from the source code of Hocuspocus, not from a real browser. |
+| Stateless messages do nothing | The server reads the `Stateless` message type but sends it to nobody. |
+| Provider version 4 does not work | Use `@hocuspocus/provider` version 3. |
 
-Regenerating the transcripts needs the pinned JavaScript:
+## How to run the tests
 
 ```bash
-npm --prefix tools/oracle ci
-composer fixtures
+composer install
+composer test
 ```
 
-### About the transcripts
+The tests need no Node.js and no network. There are three groups:
 
-The committed frames are assembled from `@hocuspocus/common`, `y-protocols`,
-and lib0, following the frame construction in each of the provider's
-`OutgoingMessage` classes. They are **not** captured from a running provider:
-the provider does not export those classes, and driving a live one needs a
-server to connect to.
+| Group | What it tests |
+|---|---|
+| `tests/Protocol` | The message format, byte for byte |
+| `tests/Server` | The rules, and the server on a real port |
+| `tests/Laravel` | A small Laravel application that starts the server and connects to it |
 
-That is a real limitation. These transcripts prove the reader agrees with the
-protocol as written; they cannot prove the provider does what its source says.
-Closing that gap — an unmodified provider reaching synced state against the
-daemon — is the exit gate this package has not yet passed.
+The Yjs format itself is in a different package,
+[hemp/yjs](https://github.com/davidhemphill/yjs-php). That package holds the
+merge code. It knows nothing about Laravel, WebSockets, or Hocuspocus.
 
-## Compatibility
+---
 
-Profile 1 is `@hocuspocus/provider` 3.4.4, yjs 13.6.29, y-protocols 1.0.7, and
-lib0 0.2.117, named in `CompatibilityProfile` so a version bump is a decision
-somebody makes rather than a dependency that drifted.
-
-Provider v4 is a later profile. It changes enough to need its own entry —
-session-aware addresses, an optional version field in authentication, bare
-one-byte ping frames — and a v4 client is expected to fail visibly here rather
-than half-work.
-
-Node is a development and CI oracle only, never a runtime dependency. A test
-asserts this.
-
-## Not built yet
-
-Named honestly, because the gap between "the tests pass" and "this is safe to
-run" is exactly this list:
-
-- **Debounced persistence.** `store()` is called on every accepted update. On a
-  document under active editing that is a write per keystroke-batch.
-- **Resident document lifecycle.** Documents are loaded per session rather than
-  held once and shared, and nothing evicts them.
-- **Backpressure.** A slow client's socket buffer is unbounded.
-- **A real provider handshake test.** See
-  [About the transcripts](#about-the-transcripts). This is the exit gate.
-- **Multi-node scaling.** One process only; see
-  [Running the daemon](#running-the-daemon).
-- **Provider v4.**
+This document uses ASD-STE100 Simplified Technical English: short sentences,
+active voice, one meaning for each word. Keep this style if you change the text.
