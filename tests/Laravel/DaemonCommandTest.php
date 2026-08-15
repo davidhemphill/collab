@@ -1,0 +1,197 @@
+<?php
+
+declare(strict_types=1);
+
+use Hemp\Collab\Protocol\AddressedFrame;
+use Hemp\Collab\Protocol\FrameReader;
+use Hemp\Collab\Protocol\Message\Authentication;
+use Hemp\Collab\Protocol\Message\Stateless;
+use Hemp\Collab\Protocol\Message\Sync;
+use Hemp\Collab\Protocol\Scope;
+use Hemp\Collab\Tests\Support\HostAuthenticator;
+use Hemp\Collab\Tests\Support\HostStore;
+use Hemp\Yjs\Protocol\Sync\SyncStep2;
+use React\EventLoop\Loop;
+
+/**
+ * The daemon as an application actually starts it.
+ *
+ * Every layer below has its own tests, but nothing until here runs the path a
+ * deployment takes: artisan reads config, resolves the hub out of the
+ * container, binds a port, and serves a client. Both bugs found in this package
+ * so far lived in exactly that gap — code that every unit test passed over and
+ * that would have failed on the first real connection.
+ */
+beforeEach(function () {
+    config()->set('collab.authenticator', HostAuthenticator::class);
+    config()->set('collab.store', HostStore::class);
+    config()->set('collab.host', '127.0.0.1');
+    config()->set('collab.port', freePort());
+});
+
+/**
+ * Run `collab:start` with the loop already carrying the test's work.
+ *
+ * The command blocks in the event loop, so the client is scheduled first and
+ * the loop is what ends the command: whoever finishes calls Loop::stop() and
+ * artisan returns. The watchdog turns a hang into a failure.
+ */
+function daemon(callable $client, float $seconds = 5.0): string
+{
+    $address = '127.0.0.1:'.config('collab.port');
+
+    Loop::futureTick(fn () => $client($address));
+
+    $watchdog = Loop::addTimer($seconds, fn () => Loop::stop());
+
+    test()->artisan('collab:start')->assertSuccessful();
+
+    Loop::cancelTimer($watchdog);
+
+    return $address;
+}
+
+it('serves a client that connects to the port from config', function () {
+    $reply = null;
+
+    daemon(function (string $address) use (&$reply) {
+        wsClient($address, function ($socket) {
+            $socket->write(clientFrame(
+                (new AddressedFrame('4711', Authentication::token('anything')))->encode(),
+            ));
+        }, function (string $payload) use (&$reply) {
+            $reply = (new FrameReader)->read($payload);
+            Loop::stop();
+        });
+    });
+
+    expect($reply)->not->toBeNull('The daemon never answered.')
+        ->and($reply->message)->toBeInstanceOf(Authentication::class)
+        ->and($reply->message->scope)->toBe(Scope::ReadWrite);
+});
+
+it('carries an edit between two clients through the container-built hub', function () {
+    // A single hub is what makes two sockets the same document. If the provider
+    // handed out a hub per resolution this would pass everywhere else and fail
+    // exactly here.
+    $delivered = null;
+
+    daemon(function (string $address) use (&$delivered) {
+        $writer = null;
+        $ready = 0;
+
+        $send = function () use (&$writer) {
+            $writer->write(clientFrame(
+                (new AddressedFrame('4711', new Sync(SyncStep2::of(seeded()))))->encode(),
+            ));
+        };
+
+        // The reader has to be subscribed before the write lands, so the edit
+        // only goes out once both handshakes have been answered.
+        wsClient($address, function ($socket) {
+            $socket->write(clientFrame(
+                (new AddressedFrame('4711', Authentication::token('anything')))->encode(),
+            ));
+        }, function (string $payload) use (&$delivered, &$ready, $send) {
+            $frame = (new FrameReader)->read($payload);
+
+            if ($frame->message instanceof Authentication) {
+                if (++$ready === 2) {
+                    $send();
+                }
+
+                return;
+            }
+
+            $delivered = $frame;
+            Loop::stop();
+        });
+
+        wsClient($address, function ($socket) use (&$writer) {
+            $writer = $socket;
+
+            $socket->write(clientFrame(
+                (new AddressedFrame('4711', Authentication::token('anything')))->encode(),
+            ));
+        }, function (string $payload) use (&$ready, $send) {
+            if ((new FrameReader)->read($payload)->message instanceof Authentication) {
+                if (++$ready === 2) {
+                    $send();
+                }
+            }
+        });
+    });
+
+    expect($delivered)->not->toBeNull('The edit never reached the other client.')
+        ->and($delivered->message)->toBeInstanceOf(Sync::class)
+        ->and($delivered->message->message->update()->structCount())
+        ->toBe(seeded()->structCount());
+});
+
+it('binds the port given on the command line over the one in config', function () {
+    $configured = config('collab.port');
+    $override = freePort();
+
+    $reply = null;
+
+    Loop::futureTick(function () use ($override, &$reply) {
+        wsClient("127.0.0.1:{$override}", function ($socket) {
+            $socket->write(clientFrame(
+                (new AddressedFrame('4711', Authentication::token('anything')))->encode(),
+            ));
+        }, function (string $payload) use (&$reply) {
+            $reply = (new FrameReader)->read($payload);
+            Loop::stop();
+        });
+    });
+
+    $watchdog = Loop::addTimer(5.0, fn () => Loop::stop());
+
+    $this->artisan('collab:start', ['--port' => $override])->assertSuccessful();
+
+    Loop::cancelTimer($watchdog);
+
+    expect($override)->not->toBe($configured)
+        ->and($reply)->not->toBeNull('The daemon did not bind the port from --port.');
+});
+
+it('drops a client that sends an oversized frame without taking the daemon with it', function () {
+    // The limit exists because a frame arrives from a socket that may not have
+    // authenticated. Enforcing it by letting the exception escape would let any
+    // stranger end every other writer's session, so the survivor is the
+    // assertion that matters here.
+    //
+    // The payload is a well-formed message that is merely too big, so size is
+    // the only thing that can close this connection. Random bytes would be
+    // refused by the frame reader instead and the test would pass either way.
+    config()->set('collab.limits.frame_bytes', 1024);
+
+    $survivorReply = null;
+    $offenderClosed = false;
+
+    daemon(function (string $address) use (&$survivorReply, &$offenderClosed) {
+        wsClient($address, function ($socket) use (&$offenderClosed, $address, &$survivorReply) {
+            $socket->on('close', function () use (&$offenderClosed, $address, &$survivorReply) {
+                $offenderClosed = true;
+
+                // Only now, so the daemon has already handled the bad frame.
+                wsClient($address, function ($next) {
+                    $next->write(clientFrame(
+                        (new AddressedFrame('4711', Authentication::token('anything')))->encode(),
+                    ));
+                }, function (string $payload) use (&$survivorReply) {
+                    $survivorReply = (new FrameReader)->read($payload);
+                    Loop::stop();
+                });
+            });
+
+            $socket->write(clientFrame(
+                (new AddressedFrame('4711', new Stateless(str_repeat('a', 4096))))->encode(),
+            ));
+        });
+    });
+
+    expect($offenderClosed)->toBeTrue('The oversized frame was accepted.')
+        ->and($survivorReply)->not->toBeNull('The daemon died with the client that abused it.')
+        ->and($survivorReply->message)->toBeInstanceOf(Authentication::class);
+});

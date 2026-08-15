@@ -51,6 +51,8 @@ class StartCommand extends Command
 
         Loop::run();
 
+        $server->stop();
+
         $this->components->info('Collaboration server stopped.');
 
         return self::SUCCESS;

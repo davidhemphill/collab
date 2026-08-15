@@ -6,14 +6,13 @@ use Hemp\Collab\Laravel\CollabServiceProvider;
 use Hemp\Collab\Protocol\AddressedFrame;
 use Hemp\Collab\Protocol\Message\Authentication;
 use Hemp\Collab\Protocol\Scope;
-use Hemp\Collab\Server\Authenticated;
 use Hemp\Collab\Server\Authenticator;
 use Hemp\Collab\Server\DocumentStore;
 use Hemp\Collab\Server\Hub;
 use Hemp\Collab\Server\SessionFactory;
 use Hemp\Collab\Server\SharedSessionFactory;
-use Hemp\Collab\Tests\Laravel\TestCase;
-use Hemp\Yjs\Update\Update;
+use Hemp\Collab\Tests\Support\HostAuthenticator;
+use Hemp\Collab\Tests\Support\HostStore;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Contracts\Support\DeferrableProvider;
 use Illuminate\Support\ServiceProvider;
@@ -25,32 +24,12 @@ use Illuminate\Support\ServiceProvider;
  * that knows Laravel exists — and the only place where a mistake shows up as a
  * daemon that will not boot rather than a failing assertion.
  */
-uses(TestCase::class)->in(__DIR__);
-
 /**
  * @return array{0: class-string, 1: class-string}
  */
 function hostBindings(): array
 {
     return [HostAuthenticator::class, HostStore::class];
-}
-
-class HostAuthenticator implements Authenticator
-{
-    public function authenticate(string $documentName, string $token): Authenticated
-    {
-        return new Authenticated(Scope::ReadWrite, identity: 'host');
-    }
-}
-
-class HostStore implements DocumentStore
-{
-    public function load(string $documentName): Update
-    {
-        return Update::empty();
-    }
-
-    public function store(string $documentName, Update $update): void {}
 }
 
 beforeEach(function () {

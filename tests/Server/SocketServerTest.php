@@ -25,44 +25,6 @@ use React\Socket\Connector;
  * hand, and speak the wire protocol, so "the server runs" is a claim with
  * evidence rather than an assumption.
  */
-
-/**
- * Run the loop until the test finishes or the deadline passes.
- *
- * $done must bind by reference — an arrow function would capture the state the
- * test started with and report a working server as a timeout.
- *
- * A daemon test that hangs is worse than one that fails, so time is bounded
- * here rather than left to the runner.
- */
-function until(callable $done, float $seconds = 5.0): void
-{
-    $timeout = Loop::addTimer($seconds, fn () => Loop::stop());
-
-    Loop::run();
-    Loop::cancelTimer($timeout);
-
-    expect($done())->toBeTrue('The server did not answer within the timeout.');
-}
-
-function handshakeFor(string $address): string
-{
-    $key = base64_encode(random_bytes(16));
-
-    return "GET / HTTP/1.1\r\n"
-        ."Host: {$address}\r\n"
-        ."Upgrade: websocket\r\n"
-        ."Connection: Upgrade\r\n"
-        ."Sec-WebSocket-Key: {$key}\r\n"
-        ."Sec-WebSocket-Version: 13\r\n\r\n";
-}
-
-/** Clients must mask; an unmasked frame is a protocol error the server rejects. */
-function clientFrame(string $payload, int $opcode = Frame::OP_BINARY): string
-{
-    return (new Frame($payload, true, $opcode))->maskPayload()->getContents();
-}
-
 function serving(Scope $scope = Scope::ReadWrite): array
 {
     $hub = new Hub(new SharedSessionFactory(authenticatorGranting($scope), memoryStore()));
