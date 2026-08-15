@@ -9,9 +9,10 @@ the work of anybody else.
 Google Docs works like this. This package gives your Laravel application the
 same behavior.
 
-> **Do not use this in production yet.** The code works and the tests pass, but
-> the package is new and no application uses it yet. Read
-> [Limits of this version](#limits-of-this-version) before you start.
+> **Do not use this in production yet.** A real `@hocuspocus/provider` connects,
+> syncs, and edits correctly against this server, but the package is new and no
+> application uses it yet. Read [Limits of this version](#limits-of-this-version)
+> before you start.
 
 ---
 
@@ -88,11 +89,22 @@ The package is not on Packagist yet. Add the two repositories to your
 }
 ```
 
-Then install the package:
+Then install the two packages:
 
 ```bash
-composer require hemp/collab:@dev
+composer require hemp/collab:@dev hemp/yjs:@dev
 ```
+
+Name both packages. If you name only `hemp/collab`, composer stops with this
+message:
+
+```text
+hemp/collab dev-main requires hemp/yjs @dev
+-> found hemp/yjs[dev-main] but it does not match your minimum-stability.
+```
+
+The `@dev` mark applies only to the package that you name. It does not apply to
+the packages that this package needs.
 
 Laravel finds the package automatically. You do not register anything.
 
@@ -189,12 +201,15 @@ class DocumentStore implements DocumentStoreContract
 }
 ```
 
-Add the two classes to your `.env` file:
+Add the two classes to your `.env` file. Use single quotation marks:
 
 ```env
-COLLAB_AUTHENTICATOR="App\Collaboration\DocumentAuthenticator"
-COLLAB_STORE="App\Collaboration\DocumentStore"
+COLLAB_AUTHENTICATOR='App\Collaboration\DocumentAuthenticator'
+COLLAB_STORE='App\Collaboration\DocumentStore'
 ```
+
+Double quotation marks do not work here. Laravel reads `\C` as a special
+character and stops with `Failed to parse dotenv file`.
 
 ### Step 5: Start the server and connect the browser
 
@@ -619,7 +634,7 @@ Read this list before you use the package for real documents.
 | The document is written for each change | Many writes to the database while a person types. This is correct but not fast. |
 | One process only | You cannot use two servers behind a load balancer. |
 | A slow browser has no limit | A browser that receives data slowly uses memory on the server. |
-| No test with a real provider yet | The tests use messages that are built from the source code of Hocuspocus, not from a real browser. |
+| The real-provider test is manual | It needs an application and a running server, so `composer test` does not include it. See [How to run the tests](#how-to-run-the-tests). |
 | Stateless messages do nothing | The server reads the `Stateless` message type but sends it to nobody. |
 | Provider version 4 does not work | Use `@hocuspocus/provider` version 3. |
 
@@ -637,6 +652,25 @@ The tests need no Node.js and no network. There are three groups:
 | `tests/Protocol` | The message format, byte for byte |
 | `tests/Server` | The rules, and the server on a real port |
 | `tests/Laravel` | A small Laravel application that starts the server and connects to it |
+
+### The test with a real browser client
+
+The tests above use messages that this package builds itself. They cannot show
+that the real JavaScript client agrees. Two scripts do that. They need Node.js,
+an application, and a running server:
+
+```bash
+npm --prefix tools/oracle ci
+php artisan collab:start --port=7788     # in your application, in another terminal
+
+node tools/oracle/e2e-provider.mjs ws://127.0.0.1:7788 <document> <token>
+node tools/oracle/e2e-readonly.mjs ws://127.0.0.1:7788 <document> <owner-token> <reader-token>
+```
+
+The first script connects a real `@hocuspocus/provider`, types from two clients,
+makes two changes at the same time, sends a cursor, connects a third client
+late, and gives a bad token. The second script shows that text from a read-only
+client reaches nobody.
 
 The Yjs format itself is in a different package,
 [hemp/yjs](https://github.com/davidhemphill/yjs-php). That package holds the
