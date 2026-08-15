@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace Hemp\Collab\Laravel;
 
 use Hemp\Collab\Laravel\Console\StartCommand;
+use Hemp\Collab\Protocol\FrameReader;
 use Hemp\Collab\Server\Authenticator;
 use Hemp\Collab\Server\DocumentStore;
 use Hemp\Collab\Server\Hub;
 use Hemp\Collab\Server\SessionFactory;
 use Hemp\Collab\Server\SharedSessionFactory;
+use Hemp\Yjs\Protocol\Awareness\AwarenessLimits;
 use Illuminate\Contracts\Support\DeferrableProvider;
 use Illuminate\Support\ServiceProvider;
 use RuntimeException;
@@ -38,12 +40,23 @@ class CollabServiceProvider extends ServiceProvider implements DeferrableProvide
             return $app->make($this->requiredClass('store', DocumentStore::class));
         });
 
+        $this->app->singleton(AwarenessLimits::class, fn ($app) => new AwarenessLimits(
+            maxClientsPerUpdate: (int) $app['config']->get('collab.limits.awareness_clients'),
+            maxStateBytes: (int) $app['config']->get('collab.limits.awareness_state_bytes'),
+        ));
+
         $this->app->singleton(SessionFactory::class, fn ($app) => new SharedSessionFactory(
             $app->make(Authenticator::class),
             $app->make(DocumentStore::class),
+            $app->make(AwarenessLimits::class),
         ));
 
-        $this->app->singleton(Hub::class);
+        // Both halves of the same policy: the reader refuses an oversized
+        // awareness update off the wire, and the store refuses to keep one.
+        $this->app->singleton(Hub::class, fn ($app) => new Hub(
+            $app->make(SessionFactory::class),
+            new FrameReader(awarenessLimits: $app->make(AwarenessLimits::class)),
+        ));
     }
 
     public function boot(): void
@@ -62,7 +75,7 @@ class CollabServiceProvider extends ServiceProvider implements DeferrableProvide
      */
     public function provides(): array
     {
-        return [Authenticator::class, DocumentStore::class, SessionFactory::class, Hub::class];
+        return [Authenticator::class, DocumentStore::class, AwarenessLimits::class, SessionFactory::class, Hub::class];
     }
 
     /**

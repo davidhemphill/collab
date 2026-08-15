@@ -28,7 +28,7 @@ class StartCommand extends Command
         $address = $server->listen($host, $port);
 
         $this->components->info("Collaboration server listening on {$address}");
-        $this->components->twoColumnDetail('Profile', CompatibilityProfile::one()->describe());
+        $this->components->twoColumnDetail('Compatibility', CompatibilityProfile::one()->describe());
         $this->newLine();
 
         // Stop accepting, then let the loop drain what is already in flight,

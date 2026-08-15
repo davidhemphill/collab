@@ -12,6 +12,7 @@ use Hemp\Collab\Protocol\Message\QueryAwareness;
 use Hemp\Collab\Protocol\Message\Sync;
 use Hemp\Collab\Protocol\Message\SyncStatus;
 use Hemp\Collab\Protocol\Scope;
+use Hemp\Yjs\Protocol\Awareness\AwarenessLimits;
 use Hemp\Yjs\Protocol\Awareness\AwarenessStore;
 use Hemp\Yjs\Protocol\Awareness\AwarenessUpdate;
 use Hemp\Yjs\Protocol\Sync\ReadOnlyPolicy;
@@ -48,8 +49,9 @@ final class Session
     public function __construct(
         private readonly Authenticator $authenticator,
         private readonly DocumentStore $documents,
+        AwarenessLimits $awarenessLimits = new AwarenessLimits,
     ) {
-        $this->awareness = new AwarenessStore;
+        $this->awareness = new AwarenessStore($awarenessLimits);
     }
 
     public function isAuthenticated(): bool

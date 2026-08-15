@@ -5,11 +5,14 @@ declare(strict_types=1);
 use Hemp\Collab\Protocol\AddressedFrame;
 use Hemp\Collab\Protocol\FrameReader;
 use Hemp\Collab\Protocol\Message\Authentication;
+use Hemp\Collab\Protocol\Message\Awareness;
 use Hemp\Collab\Protocol\Message\Stateless;
 use Hemp\Collab\Protocol\Message\Sync;
 use Hemp\Collab\Protocol\Scope;
 use Hemp\Collab\Tests\Support\HostAuthenticator;
 use Hemp\Collab\Tests\Support\HostStore;
+use Hemp\Yjs\Protocol\Awareness\AwarenessEntry;
+use Hemp\Yjs\Protocol\Awareness\AwarenessUpdate;
 use Hemp\Yjs\Protocol\Sync\SyncStep2;
 use React\EventLoop\Loop;
 
@@ -194,4 +197,32 @@ it('drops a client that sends an oversized frame without taking the daemon with 
     expect($offenderClosed)->toBeTrue('The oversized frame was accepted.')
         ->and($survivorReply)->not->toBeNull('The daemon died with the client that abused it.')
         ->and($survivorReply->message)->toBeInstanceOf(Authentication::class);
+});
+
+it('applies the configured awareness limit to a real connection', function () {
+    // These keys shipped in the config file for a while while nothing read
+    // them, which is worse than not offering them at all: an operator lowering
+    // a limit would believe they had.
+    config()->set('collab.limits.awareness_clients', 2);
+
+    $closed = false;
+
+    daemon(function (string $address) use (&$closed) {
+        wsClient($address, function ($socket) use (&$closed) {
+            $socket->on('close', function () use (&$closed) {
+                $closed = true;
+                Loop::stop();
+            });
+
+            $socket->write(clientFrame(
+                (new AddressedFrame('4711', new Awareness(new AwarenessUpdate([
+                    new AwarenessEntry(1, 1, '{"n":"a"}'),
+                    new AwarenessEntry(2, 1, '{"n":"b"}'),
+                    new AwarenessEntry(3, 1, '{"n":"c"}'),
+                ]))))->encode(),
+            ));
+        });
+    });
+
+    expect($closed)->toBeTrue('An awareness update over the configured limit was accepted.');
 });
