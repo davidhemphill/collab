@@ -72,7 +72,7 @@ function memoryStore(): DocumentStore
 
 function seeded(): Update
 {
-    // A real update, taken from the frame yjs-hocuspocus records the provider
+    // A real update, taken from the frame this package records the provider
     // sending. Hand-built bytes would only prove this agrees with itself.
     $frame = (new FrameReader)->read(Transcripts::bytes('sync-update'));
 
