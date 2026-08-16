@@ -6,10 +6,11 @@ use Hemp\Collab\Protocol\AddressedFrame;
 use Hemp\Collab\Protocol\FrameReader;
 use Hemp\Collab\Protocol\Message\Authentication;
 use Hemp\Collab\Protocol\Scope;
+use Hemp\Collab\Server\Certificate;
 use Hemp\Collab\Server\Hub;
 use Hemp\Collab\Server\SharedSessionFactory;
 use Hemp\Collab\Server\SocketServer;
-use Hemp\Collab\Server\TlsCertificate;
+use Hemp\Collab\Server\TlsContext;
 use React\EventLoop\Loop;
 use React\Socket\ConnectionInterface;
 use React\Socket\Connector;
@@ -55,7 +56,7 @@ it('answers a wss client with no proxy in front of it', function () {
     $path = selfSignedCertificate();
 
     $hub = new Hub(new SharedSessionFactory(authenticatorGranting(Scope::ReadWrite), memoryStore()));
-    $server = new SocketServer($hub, tls: new TlsCertificate($path));
+    $server = new SocketServer($hub, tls: ['local_cert' => $path]);
 
     expect($server->isSecure())->toBeTrue();
 
@@ -126,32 +127,87 @@ it('stays plain when no certificate is given', function () {
     $server->stop();
 });
 
-it('refuses to start rather than failing at the first handshake', function () {
-    // A missing certificate otherwise shows up as a TLS error in a browser
-    // console and nothing at all in the server log.
-    $hub = new Hub(new SharedSessionFactory(authenticatorGranting(Scope::ReadWrite), memoryStore()));
-    $server = new SocketServer($hub, tls: new TlsCertificate('/nowhere/missing.pem'));
-
-    expect(fn () => $server->listen('127.0.0.1', 0))
+it('refuses to resolve rather than failing at the first handshake', function () {
+    // A path that does not resolve otherwise shows up as a TLS error in a
+    // browser console and nothing at all in the server log.
+    expect(fn () => TlsContext::resolve(['local_cert' => '/nowhere/missing.pem']))
         ->toThrow(RuntimeException::class, 'does not exist or cannot be read');
 });
 
-it('reads a certificate and a separate key out of configuration', function () {
-    $tls = TlsCertificate::fromConfig([
-        'certificate' => '/tmp/cert.pem',
-        'key' => '/tmp/key.pem',
-        'passphrase' => 'hunter2',
-    ]);
-
-    expect($tls->context())->toBe([
-        'local_cert' => '/tmp/cert.pem',
-        'local_pk' => '/tmp/key.pem',
-        'passphrase' => 'hunter2',
-    ]);
+it('decides on TLS from the certificate rather than a separate switch', function () {
+    // Reverb's rule. A boolean beside the certificate is one more thing that
+    // can disagree with it.
+    expect(TlsContext::secures([]))->toBeFalse()
+        ->and(TlsContext::secures(['local_cert' => '/tmp/c.pem']))->toBeTrue()
+        ->and(TlsContext::secures(['local_pk' => '/tmp/k.pem']))->toBeTrue()
+        ->and(TlsContext::secures(['verify_peer' => true]))->toBeFalse();
 });
 
-it('is off unless a certificate is named', function () {
-    expect(TlsCertificate::fromConfig([]))->toBeNull()
-        ->and(TlsCertificate::fromConfig(['certificate' => '']))->toBeNull()
-        ->and(TlsCertificate::fromConfig(['certificate' => null]))->toBeNull();
+it('drops empty configuration rather than treating it as a path', function () {
+    // Unset environment variables arrive as null or an empty string, and either
+    // one would otherwise turn TLS on and then fail to find the file.
+    expect(TlsContext::resolve(['local_cert' => null, 'local_pk' => '']))->toBe([])
+        ->and(TlsContext::secures(TlsContext::resolve(['local_cert' => null])))->toBeFalse();
+});
+
+it('passes through any option PHP understands', function () {
+    $path = selfSignedCertificate();
+
+    $context = TlsContext::resolve([
+        'local_cert' => $path,
+        'verify_peer' => false,
+        'ciphers' => 'HIGH:!aNULL',
+    ]);
+
+    expect($context)->toBe([
+        'local_cert' => $path,
+        'verify_peer' => false,
+        'ciphers' => 'HIGH:!aNULL',
+    ]);
+
+    @unlink($path);
+});
+
+it('finds a local certificate from the hostname alone', function () {
+    // Herd and Valet issue one per secured site. A developer who has already
+    // secured their site should not have to name any paths.
+    $host = 'collab-fixture-'.getmypid().'.test';
+    $directory = Certificate::herdPath();
+
+    if (! is_dir($directory)) {
+        test()->markTestSkipped('No Herd certificate directory on this machine.');
+    }
+
+    $certificate = $directory.$host.'.crt';
+    $key = $directory.$host.'.key';
+    file_put_contents($certificate, 'x');
+    file_put_contents($key, 'x');
+
+    try {
+        expect(Certificate::exists($host))->toBeTrue()
+            ->and(Certificate::resolve("https://{$host}"))->toBe([$certificate, $key]);
+
+        $context = TlsContext::resolve([], $host);
+
+        expect($context['local_cert'])->toBe($certificate)
+            ->and($context['local_pk'])->toBe($key)
+            ->and(TlsContext::secures($context))->toBeTrue();
+    } finally {
+        @unlink($certificate);
+        @unlink($key);
+    }
+});
+
+it('leaves a configured certificate alone rather than replacing it', function () {
+    $path = selfSignedCertificate();
+
+    $context = TlsContext::resolve(['local_cert' => $path], 'anything.test');
+
+    expect($context['local_cert'])->toBe($path);
+
+    @unlink($path);
+});
+
+it('stays plain when the hostname has no certificate', function () {
+    expect(TlsContext::resolve([], 'no-certificate-for-this.test'))->toBe([]);
 });

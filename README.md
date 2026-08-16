@@ -419,9 +419,10 @@ php artisan vendor:publish --tag=collab-config
 |---|---|---|---|
 | `host` | `COLLAB_HOST` | `127.0.0.1` | The address of the server |
 | `port` | `COLLAB_PORT` | `1234` | The port of the server |
-| `tls.certificate` | `COLLAB_TLS_CERTIFICATE` | none | Certificate file; set it and the server speaks `wss://` |
-| `tls.key` | `COLLAB_TLS_KEY` | none | Private key file, if it is not in the certificate file |
-| `tls.passphrase` | `COLLAB_TLS_PASSPHRASE` | none | Passphrase, if the key has one |
+| `hostname` | `COLLAB_HOSTNAME` | none | Site name; finds a Herd or Valet certificate for it |
+| `options.tls.local_cert` | `COLLAB_TLS_CERT` | none | Certificate file; set it and the server speaks `wss://` |
+| `options.tls.local_pk` | `COLLAB_TLS_KEY` | none | Private key file, if it is not in the certificate file |
+| `options.tls.passphrase` | `COLLAB_TLS_PASSPHRASE` | none | Passphrase, if the key has one |
 | `authenticator` | `COLLAB_AUTHENTICATOR` | none | Your `Authenticator` class |
 | `store` | `COLLAB_STORE` | none | Your `DocumentStore` class |
 | `limits.frame_bytes` | `COLLAB_MAX_FRAME_BYTES` | 16 MB | The largest message from a browser |
@@ -495,8 +496,15 @@ refuses it, with one exception: `127.0.0.1`. So a real deployment needs
 **Give the server a certificate.** The server then speaks `wss://` itself:
 
 ```env
-COLLAB_TLS_CERTIFICATE=/path/to/certificate.pem
+COLLAB_TLS_CERT=/path/to/certificate.pem
 COLLAB_TLS_KEY=/path/to/private-key.pem
+```
+
+In local development, name the site instead and Herd or Valet's own certificate
+for it is found automatically:
+
+```env
+COLLAB_HOSTNAME=my-app.test
 ```
 
 ```bash
@@ -513,8 +521,17 @@ that cannot terminate TLS cannot be reached at all.
 
 If the certificate file holds a chain, put the server's own certificate first
 and each issuer after it. `COLLAB_TLS_KEY` is not necessary when the key is in
-the same file. The server reads both files at start and refuses to start if
-either is missing, rather than failing later on a connection.
+the same file. The server checks both files at start and refuses to start if
+either cannot be read, rather than failing later on a connection.
+
+TLS is on when a certificate is present and off when it is not. There is no
+separate switch to keep in agreement with it.
+
+`config/collab.php` holds these under `options.tls`, and they are PHP's own SSL
+context options, so anything PHP accepts can be set — `verify_peer`, `ciphers`,
+`cafile`, and the rest. This is the same shape Reverb uses, on purpose: an
+application often runs both servers, and they should not disagree about how a
+certificate is named or where a local one is found.
 
 **Or put a proxy in front.** Use this when you control the web server. It keeps
 everything on port 443 with no port number in the URL:

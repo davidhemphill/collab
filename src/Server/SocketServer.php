@@ -41,7 +41,7 @@ final class SocketServer
         private readonly Hub $hub,
         private readonly int $maxFrameBytes = 16 * 1024 * 1024,
         private readonly ?LoopInterface $loop = null,
-        private readonly ?TlsCertificate $tls = null,
+        private readonly array $tls = [],
     ) {}
 
     /**
@@ -49,7 +49,7 @@ final class SocketServer
      */
     public function isSecure(): bool
     {
-        return $this->tls !== null;
+        return TlsContext::secures($this->tls);
     }
 
     /**
@@ -64,11 +64,11 @@ final class SocketServer
         // only option on a platform that does not let you put a proxy in
         // front. Without one it speaks plain ws:// and something else is
         // expected to handle TLS.
-        $this->tls?->verify();
+        $secure = $this->isSecure();
 
         $this->socket = new ReactSocketServer(
-            ($this->tls !== null ? 'tls://' : '')."{$host}:{$port}",
-            $this->tls !== null ? ['tls' => $this->tls->context()] : [],
+            ($secure ? 'tls://' : '')."{$host}:{$port}",
+            $secure ? ['tls' => $this->tls] : [],
             $loop,
         );
         $this->socket->on('connection', $this->accept(...));

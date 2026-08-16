@@ -6,10 +6,9 @@ return [
     | Server
     |--------------------------------------------------------------------------
     |
-    | Where the daemon listens. It sits behind a reverse proxy that terminates
-    | TLS and forwards the WebSocket upgrade, so binding to localhost is the
-    | right default — a collaboration server reachable from the internet
-    | without a proxy in front is almost never intended.
+    | Where the server listens. Bind to localhost when something in front of it
+    | terminates TLS, and to 0.0.0.0 when the server does that itself and has
+    | to be reachable from outside the machine.
     |
     */
 
@@ -22,19 +21,30 @@ return [
     | TLS
     |--------------------------------------------------------------------------
     |
-    | Set a certificate and the server speaks wss:// itself, with no proxy in
+    | Name a certificate and the server speaks wss:// itself, with nothing in
     | front of it. This is the only option on a platform that does not let you
-    | configure one, and a page served over https cannot open a plain ws://
-    | connection to anything except localhost.
+    | configure a web server, because a page served over https cannot open a
+    | plain ws:// connection to anything except 127.0.0.1.
     |
-    | Leave these empty when something ahead of the server terminates TLS.
+    | These are PHP's own SSL context options, so anything PHP accepts may be
+    | set here. The shape follows Reverb's: an application will often run both
+    | servers, and they should not disagree about how certificates are named.
+    |
+    | Set `hostname` in local development and Herd or Valet's own certificate
+    | for that site is found and used without naming any paths.
+    |
+    | Leave all of it empty when a reverse proxy handles encryption.
     |
     */
 
-    'tls' => [
-        'certificate' => env('COLLAB_TLS_CERTIFICATE'),
-        'key' => env('COLLAB_TLS_KEY'),
-        'passphrase' => env('COLLAB_TLS_PASSPHRASE'),
+    'hostname' => env('COLLAB_HOSTNAME'),
+
+    'options' => [
+        'tls' => [
+            'local_cert' => env('COLLAB_TLS_CERT'),
+            'local_pk' => env('COLLAB_TLS_KEY'),
+            'passphrase' => env('COLLAB_TLS_PASSPHRASE'),
+        ],
     ],
 
     /*
