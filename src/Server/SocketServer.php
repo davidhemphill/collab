@@ -41,7 +41,16 @@ final class SocketServer
         private readonly Hub $hub,
         private readonly int $maxFrameBytes = 16 * 1024 * 1024,
         private readonly ?LoopInterface $loop = null,
+        private readonly ?TlsCertificate $tls = null,
     ) {}
+
+    /**
+     * Whether this server speaks wss:// rather than ws://.
+     */
+    public function isSecure(): bool
+    {
+        return $this->tls !== null;
+    }
 
     /**
      * Start listening. Returns the address actually bound, which matters when
@@ -51,7 +60,17 @@ final class SocketServer
     {
         $loop = $this->loop ?? Loop::get();
 
-        $this->socket = new ReactSocketServer("{$host}:{$port}", [], $loop);
+        // With a certificate the server terminates TLS itself, which is the
+        // only option on a platform that does not let you put a proxy in
+        // front. Without one it speaks plain ws:// and something else is
+        // expected to handle TLS.
+        $this->tls?->verify();
+
+        $this->socket = new ReactSocketServer(
+            ($this->tls !== null ? 'tls://' : '')."{$host}:{$port}",
+            $this->tls !== null ? ['tls' => $this->tls->context()] : [],
+            $loop,
+        );
         $this->socket->on('connection', $this->accept(...));
 
         return (string) $this->socket->getAddress();

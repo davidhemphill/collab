@@ -7,6 +7,7 @@ namespace Hemp\Collab\Laravel\Console;
 use Hemp\Collab\Protocol\CompatibilityProfile;
 use Hemp\Collab\Server\Hub;
 use Hemp\Collab\Server\SocketServer;
+use Hemp\Collab\Server\TlsCertificate;
 use Illuminate\Console\Command;
 use React\EventLoop\Loop;
 
@@ -23,11 +24,19 @@ class StartCommand extends Command
         $host = $this->option('host') ?: config('collab.host');
         $port = (int) ($this->option('port') ?: config('collab.port'));
 
-        $server = new SocketServer($hub, maxFrameBytes: (int) config('collab.limits.frame_bytes'));
+        $server = new SocketServer(
+            $hub,
+            maxFrameBytes: (int) config('collab.limits.frame_bytes'),
+            tls: TlsCertificate::fromConfig(config('collab.tls', [])),
+        );
 
         $address = $server->listen($host, $port);
 
         $this->components->info("Collaboration server listening on {$address}");
+        $this->components->twoColumnDetail(
+            'Clients connect with',
+            $server->isSecure() ? 'wss:// (this server terminates TLS)' : 'ws:// (no TLS here)',
+        );
         $this->components->twoColumnDetail('Compatibility', CompatibilityProfile::one()->describe());
         $this->newLine();
 

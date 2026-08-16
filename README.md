@@ -419,6 +419,9 @@ php artisan vendor:publish --tag=collab-config
 |---|---|---|---|
 | `host` | `COLLAB_HOST` | `127.0.0.1` | The address of the server |
 | `port` | `COLLAB_PORT` | `1234` | The port of the server |
+| `tls.certificate` | `COLLAB_TLS_CERTIFICATE` | none | Certificate file; set it and the server speaks `wss://` |
+| `tls.key` | `COLLAB_TLS_KEY` | none | Private key file, if it is not in the certificate file |
+| `tls.passphrase` | `COLLAB_TLS_PASSPHRASE` | none | Passphrase, if the key has one |
 | `authenticator` | `COLLAB_AUTHENTICATOR` | none | Your `Authenticator` class |
 | `store` | `COLLAB_STORE` | none | Your `DocumentStore` class |
 | `limits.frame_bytes` | `COLLAB_MAX_FRAME_BYTES` | 16 MB | The largest message from a browser |
@@ -485,8 +488,36 @@ is too small, Supervisor kills a server that is still busy.
 
 ### Add encryption
 
-The server speaks WebSocket, but it does no encryption. Put nginx in front of
-it:
+A page served over `https://` cannot open a `ws://` connection. The browser
+refuses it, with one exception: `127.0.0.1`. So a real deployment needs
+`wss://`, and there are two ways to get it.
+
+**Give the server a certificate.** The server then speaks `wss://` itself:
+
+```env
+COLLAB_TLS_CERTIFICATE=/path/to/certificate.pem
+COLLAB_TLS_KEY=/path/to/private-key.pem
+```
+
+```bash
+php artisan collab:start --host=0.0.0.0 --port=443
+```
+
+```js
+url: 'wss://example.com:8443'
+```
+
+Use this on a platform that does not let you configure a web server — Laravel
+Cloud and most managed hosts. There is nowhere to put a proxy there, so a server
+that cannot terminate TLS cannot be reached at all.
+
+If the certificate file holds a chain, put the server's own certificate first
+and each issuer after it. `COLLAB_TLS_KEY` is not necessary when the key is in
+the same file. The server reads both files at start and refuses to start if
+either is missing, rather than failing later on a connection.
+
+**Or put a proxy in front.** Use this when you control the web server. It keeps
+everything on port 443 with no port number in the URL:
 
 ```nginx
 location /collab {
@@ -501,11 +532,8 @@ location /collab {
 }
 ```
 
-Then use `wss://` in the browser:
-
-```js
-url: 'wss://example.com/collab'
-```
+Leave `COLLAB_TLS_CERTIFICATE` empty in this case. The proxy does the
+encryption and the server speaks plain WebSocket behind it.
 
 ### Use one server only
 
@@ -527,6 +555,12 @@ document. You give that document to the provider.
 ### Must I change my JavaScript code?
 
 No. Use the usual `@hocuspocus/provider` package. Change only the `url` value.
+
+### Can I use this on Laravel Cloud, or another host with no web server config?
+
+Yes. Give the server a certificate with `COLLAB_TLS_CERTIFICATE` and it speaks
+`wss://` on its own. A reverse proxy is one way to add encryption, not the only
+one, and it is not available on those platforms.
 
 ### Do I need Node.js?
 
@@ -635,6 +669,7 @@ Read this list before you use the package for real documents.
 | One process only | You cannot use two servers behind a load balancer. |
 | A slow browser has no limit | A browser that receives data slowly uses memory on the server. |
 | The real-provider test is manual | It needs an application and a running server, so `composer test` does not include it. See [How to run the tests](#how-to-run-the-tests). |
+| No certificate reloading | A renewed certificate is picked up when the server restarts, not before. |
 | Stateless messages do nothing | The server reads the `Stateless` message type but sends it to nobody. |
 | Provider version 4 does not work | Use `@hocuspocus/provider` version 3. |
 

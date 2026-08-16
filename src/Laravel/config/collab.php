@@ -19,6 +19,26 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | TLS
+    |--------------------------------------------------------------------------
+    |
+    | Set a certificate and the server speaks wss:// itself, with no proxy in
+    | front of it. This is the only option on a platform that does not let you
+    | configure one, and a page served over https cannot open a plain ws://
+    | connection to anything except localhost.
+    |
+    | Leave these empty when something ahead of the server terminates TLS.
+    |
+    */
+
+    'tls' => [
+        'certificate' => env('COLLAB_TLS_CERTIFICATE'),
+        'key' => env('COLLAB_TLS_KEY'),
+        'passphrase' => env('COLLAB_TLS_PASSPHRASE'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Application seams
     |--------------------------------------------------------------------------
     |
