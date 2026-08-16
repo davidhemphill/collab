@@ -500,11 +500,16 @@ COLLAB_TLS_CERT=/path/to/certificate.pem
 COLLAB_TLS_KEY=/path/to/private-key.pem
 ```
 
-In local development, name the site instead and Herd or Valet's own certificate
-for it is found automatically:
+In local development you usually set nothing at all. The hostname defaults to
+the host in `APP_URL`, and if Herd or Valet has secured that site, its
+certificate is found and used. A secured site therefore serves `wss://` with no
+collaboration configuration beyond the two classes.
+
+Set `COLLAB_HOSTNAME` only when the server answers on a different name from the
+application:
 
 ```env
-COLLAB_HOSTNAME=my-app.test
+COLLAB_HOSTNAME=collab.my-app.test
 ```
 
 ```bash

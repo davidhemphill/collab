@@ -30,14 +30,20 @@ return [
     | set here. The shape follows Reverb's: an application will often run both
     | servers, and they should not disagree about how certificates are named.
     |
-    | Set `hostname` in local development and Herd or Valet's own certificate
-    | for that site is found and used without naming any paths.
+    | `hostname` defaults to the host in APP_URL, which is almost always the
+    | right answer: the server runs beside the application and answers on the
+    | same name. In local development that means a secured Herd or Valet site
+    | needs no collaboration configuration at all — the certificate for the
+    | site is found and used. Set it only when the server answers on some other
+    | name.
     |
-    | Leave all of it empty when a reverse proxy handles encryption.
+    | Leave all of it empty when a reverse proxy handles encryption. A hostname
+    | with no certificate anywhere is not an error; the server simply stays
+    | plain, which is what a proxy in front of it expects.
     |
     */
 
-    'hostname' => env('COLLAB_HOSTNAME'),
+    'hostname' => env('COLLAB_HOSTNAME') ?: (parse_url((string) env('APP_URL'), PHP_URL_HOST) ?: null),
 
     'options' => [
         'tls' => [

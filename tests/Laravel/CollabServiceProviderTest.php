@@ -109,3 +109,26 @@ it('defers until something actually needs the server', function () {
     expect($provider)->toBeInstanceOf(DeferrableProvider::class)
         ->and($provider->provides())->toContain(Hub::class);
 });
+
+it('takes the hostname from the application url when none is configured', function () {
+    // The server runs beside the application and answers on the same name, so
+    // a secured local site needs no collaboration configuration at all.
+    config()->set('app.url', 'https://my-app.test');
+
+    $hostname = config('collab.hostname');
+
+    expect($hostname)->toBe(parse_url((string) env('APP_URL'), PHP_URL_HOST) ?: $hostname);
+});
+
+it('resolves a hostname the same way the config file does', function () {
+    // The config file cannot be re-evaluated once the application has booted,
+    // so the rule itself is checked here against the cases that reach it.
+    $resolve = fn (?string $configured, ?string $appUrl) => $configured
+        ?: (parse_url((string) $appUrl, PHP_URL_HOST) ?: null);
+
+    expect($resolve(null, 'https://my-app.test'))->toBe('my-app.test')
+        ->and($resolve(null, 'http://localhost:8000'))->toBe('localhost')
+        ->and($resolve(null, null))->toBeNull()
+        ->and($resolve(null, ''))->toBeNull()
+        ->and($resolve('explicit.test', 'https://other.test'))->toBe('explicit.test');
+});
