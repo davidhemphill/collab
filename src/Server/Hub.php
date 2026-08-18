@@ -31,7 +31,16 @@ final class Hub
     /** @var array<string, Connection> */
     private array $connections = [];
 
-    /** @var array<string, array<string, true>> Document name to connection ids. */
+    /**
+     * Document name to connection ids.
+     *
+     * Membership means the connection has authenticated for that document, so
+     * everything reachable through {@see peers()} has already proved it may
+     * read the document. Nothing else re-checks that, so nothing may add an
+     * entry here without asking the session first.
+     *
+     * @var array<string, array<string, true>>
+     */
     private array $subscribers = [];
 
     public function __construct(
@@ -72,10 +81,6 @@ final class Hub
 
         $session = $connection->sessionFor($frame->documentName);
 
-        // Subscribe on first sight so a client hears about other writers even
-        // before it has finished its own handshake.
-        $this->subscribers[$frame->documentName][$connection->id] = true;
-
         try {
             $replies = $session->receive($frame);
         } catch (DecodeException $failure) {
@@ -83,6 +88,14 @@ final class Hub
             $this->remove($connection);
 
             return;
+        }
+
+        // Joining the document is what makes a connection reachable, so it
+        // waits for the handshake. Subscribing any earlier would mean that
+        // naming a document was enough to receive every edit made to it,
+        // without a token ever being presented.
+        if ($session->isAuthenticated()) {
+            $this->subscribers[$frame->documentName][$connection->id] = true;
         }
 
         $connection->sendAll($replies);
@@ -106,6 +119,15 @@ final class Hub
      */
     private function fanOut(Connection $sender, AddressedFrame $frame, array $replies): void
     {
+        // A connection speaks for nobody until it has authenticated for this
+        // document. An update is already covered by the accepted check below,
+        // since a session that refused to merge sends back no status. Awareness
+        // carries no status at all, so without this a stranger could put a
+        // cursor under any name in front of everyone in the document.
+        if (! $sender->sessionFor($frame->documentName)->isAuthenticated()) {
+            return;
+        }
+
         $message = $frame->message;
 
         if ($message instanceof Sync) {

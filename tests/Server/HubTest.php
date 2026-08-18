@@ -137,6 +137,59 @@ it('never relays an update it refused', function () {
         ->and($store->load('4711')->isEmpty())->toBeTrue();
 });
 
+it('sends nothing to a connection that has not authenticated', function () {
+    // Naming a document used to be enough to join it, so a stranger who knew
+    // the name received every edit made to it without presenting a token.
+    [$hub] = hub();
+    $alice = client($hub, 'a');
+    $eve = client($hub, 'e');
+
+    authenticated($hub, $alice);
+
+    // Eve names the document, and nothing else.
+    say($hub, $eve, new Sync(new SyncStep1(StateVector::empty())));
+    $eve->drain();
+
+    say($hub, $alice, new Sync(SyncStep2::of(seeded())));
+
+    expect($eve->drain())->toBe([])
+        ->and($eve->connection->sessionFor('4711')->isAuthenticated())->toBeFalse()
+        ->and($hub->subscriberCount('4711'))->toBe(1);
+});
+
+it('does not relay presence from a connection that has not authenticated', function () {
+    // Awareness carries no accepted status, so the check that stops a refused
+    // update cannot stop this one.
+    [$hub] = hub();
+    $alice = client($hub, 'a');
+    $eve = client($hub, 'e');
+
+    authenticated($hub, $alice);
+
+    say($hub, $eve, new Awareness(new AwarenessUpdate([
+        new AwarenessEntry(99, 1, '{"name":"Impostor"}'),
+    ])));
+
+    expect($alice->drain())->toBe([]);
+});
+
+it('joins the document as soon as the handshake succeeds', function () {
+    // The subscriber list is what makes a connection reachable, so a client
+    // that authenticates and then says nothing more still receives edits.
+    [$hub] = hub();
+    $alice = client($hub, 'a');
+    $bob = client($hub, 'b');
+
+    authenticated($hub, $alice);
+    authenticated($hub, $bob);
+
+    expect($hub->subscriberCount('4711'))->toBe(2);
+
+    say($hub, $alice, new Sync(SyncStep2::of(seeded())));
+
+    expect($bob->drain()[0]->message)->toBeInstanceOf(Sync::class);
+});
+
 it('does not relay a sync step one, which asks rather than tells', function () {
     [$hub] = hub();
     $alice = client($hub, 'a');
