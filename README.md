@@ -23,13 +23,17 @@ same behavior.
 - [Quick start](#quick-start)
 - [Definitions](#definitions)
 - [How the parts fit together](#how-the-parts-fit-together)
+- [Inside the server](#inside-the-server)
 - [The two classes you write](#the-two-classes-you-write)
 - [Settings](#settings)
 - [How to start the server](#how-to-start-the-server)
 - [How to install the server on a production machine](#how-to-install-the-server-on-a-production-machine)
+- [Commands](#commands)
 - [Questions and answers](#questions-and-answers)
+- [Troubleshooting](#troubleshooting)
 - [Limits of this version](#limits-of-this-version)
 - [How to run the tests](#how-to-run-the-tests)
+- [How to work on this package](#how-to-work-on-this-package)
 
 ---
 
@@ -66,10 +70,14 @@ You need these things:
 | PHP | 8.4 or later, on a 64-bit machine |
 | Laravel | 11 or 12 |
 | A JavaScript editor with Yjs support | Tiptap, BlockNote, ProseMirror, Quill, Monaco, CodeMirror, or Slate |
+| `@hocuspocus/provider` | Version 3. Version 4 does not work. |
 | A machine that can run a process that does not stop | A virtual server, a container, or a dedicated machine |
 
 Shared hosting is not sufficient. The server must run all the time. See
 [Questions and answers](#questions-and-answers).
+
+The package needs no PHP extension that a usual Laravel installation does not
+have. It needs no Redis and no queue.
 
 ## Quick start
 
@@ -275,6 +283,10 @@ A connection between a browser and a server that stays open. Both sides send
 data at any time. A usual HTTP request is not sufficient, because the server
 must speak first when another person makes a change.
 
+**Frame**
+One message on the WebSocket connection. In this protocol each frame names one
+document and holds one message about that document.
+
 **Awareness**
 The data that is not part of the document, but that the other persons must see.
 The cursor position and the name of a person are awareness data. Awareness data
@@ -288,6 +300,14 @@ package does not look inside the token.
 **Scope**
 The permission of one person for one document. There are two values:
 `Scope::ReadWrite` and `Scope::ReadOnly`.
+
+**Connection**
+One open socket from one browser. A browser uses one connection for all the
+documents that the person opens.
+
+**Session**
+The state of one connection for one document. One connection has one session for
+each document that it opens. Each session has its own permission.
 
 **The server**
 The PHP process that `php artisan collab:start` starts. It stays open, it holds
@@ -326,6 +346,337 @@ Two rules keep this correct:
   read-only permission cannot send changes to the other persons.
 - If a person closes the page, the server tells the other persons to remove that
   cursor.
+
+## Inside the server
+
+Read this section if you want to change this package, or if you must find the
+cause of a problem. You do not need this section to use the package.
+
+### The map of the code
+
+```text
+src/
+├── Protocol/                     The message format. No sockets. No Laravel.
+│   ├── AddressedFrame.php        One frame: a document name and one message.
+│   ├── AuthMessageType.php       The three authentication numbers.
+│   ├── CloseEvent.php            The close codes that the provider understands.
+│   ├── CompatibilityProfile.php  The client versions that this server targets.
+│   ├── FrameReader.php           Bytes to a frame. The untrusted surface.
+│   ├── MessageType.php           The message numbers.
+│   ├── Scope.php                 read-write or readonly.
+│   └── Message/                  One class for each type of message.
+│       ├── Authentication.php    The four shapes of the handshake.
+│       ├── Awareness.php         A cursor update.
+│       ├── Close.php             "I am done with this document."
+│       ├── ProviderMessage.php   The interface that each message implements.
+│       ├── QueryAwareness.php    "Tell me who else is here."
+│       ├── Stateless.php         A string that the protocol does not read.
+│       ├── Sync.php              A document update.
+│       └── SyncStatus.php        "I accepted it" or "I refused it".
+├── Server/                       The rules. One class touches a socket.
+│   ├── Authenticated.php         The result of a good token.
+│   ├── AuthenticationFailed.php  The result of a bad token.
+│   ├── Authenticator.php         An interface. You write the class.
+│   ├── Certificate.php           Finds a Herd or Valet certificate.
+│   ├── Connection.php            One socket, and the documents open on it.
+│   ├── DocumentStore.php         An interface. You write the class.
+│   ├── Hub.php                   Sends each change to the other persons.
+│   ├── Session.php               One person, one document. The state machine.
+│   ├── SessionFactory.php        An interface that builds a session.
+│   ├── SharedSessionFactory.php  The usual one: the same classes for each document.
+│   ├── SocketServer.php          The only class that touches a socket.
+│   └── TlsContext.php            The certificate settings.
+└── Laravel/
+    ├── CollabServiceProvider.php Puts the parts in the Laravel container.
+    ├── Console/StartCommand.php  The collab:start command.
+    └── config/collab.php         The settings file.
+```
+
+The `Protocol` and `Server` directories know nothing about Laravel. Only the
+`Laravel` directory does. This is why the tests for the rules run with no
+application under them.
+
+### The path of one message
+
+```text
+bytes arrive on the socket
+   │
+   ▼
+SocketServer     removes the WebSocket wrapper, gives the payload to the hub
+   │
+   ▼
+Hub              decodes the frame, finds the connection
+   │
+   ▼
+Connection       finds the session for that document name, or makes one
+   │
+   ▼
+Session          decides what to answer
+   │
+   ├──→ your Authenticator     (one time for each document)
+   └──→ your DocumentStore     (for each change)
+   │
+   ▼
+Session          returns a list of frames
+   │
+   ▼
+Hub              sends them to this person, then sends the change to the others
+   │
+   ▼
+SocketServer     adds the WebSocket wrapper
+   │
+   ▼
+bytes leave on the socket
+```
+
+Only `SocketServer` touches a socket. Everything above it takes strings and
+returns strings, so the tests drive the full path with no port open.
+
+### What each class does
+
+| Class | Question it answers |
+|---|---|
+| `FrameReader` | What does this block of bytes say? |
+| `AddressedFrame` | Which document, and which message? |
+| `Session` | What do I answer this one person about this one document? |
+| `Connection` | Which documents does this socket have open? |
+| `Hub` | Who else must see this? |
+| `SocketServer` | How do bytes get in and out? |
+
+### The frame format
+
+Each frame has the same three parts:
+
+```text
+varString   the document name
+varUint     the message type
+   ...      the payload, one shape for each type
+```
+
+`varString` and `varUint` are the lib0 number formats. The `hemp/yjs` package
+reads and writes them.
+
+One frame holds one message. This matters more than it looks: the reader uses
+"nothing follows" as a fact, not as a guess, to tell two different
+authentication messages apart. The reader also refuses a frame with bytes left
+over, because leftover bytes mean it read the payload wrong.
+
+### The message types
+
+| Number | Name | Direction | Payload |
+|---|---|---|---|
+| 0 | Sync | both | A y-protocols sync message |
+| 1 | Awareness | both | An awareness update, with its length in front |
+| 2 | Auth | both | See [the authentication exchange](#the-authentication-exchange) |
+| 3 | QueryAwareness | client to server | None |
+| 4 | *unassigned* | — | The server refuses the frame |
+| 5 | Stateless | both | A string. The server reads it and does nothing. |
+| 6 | *unassigned* | — | The server refuses the frame |
+| 7 | Close | client to server | None |
+| 8 | SyncStatus | server to client | 1 for accepted, 0 for refused |
+
+Numbers 4 and 6 have no meaning in this profile. The server refuses them instead
+of ignoring them, because a later provider could give them a meaning that this
+server does not understand.
+
+The `SyncStatus` flag is a **signed** varInt, not the unsigned one that every
+other count in this protocol uses. The provider reads it that way.
+
+### The authentication exchange
+
+Three numbers carry four messages, because number 0 travels in both directions:
+
+| Number | Payload | Direction | Meaning |
+|---|---|---|---|
+| 0 | none | server to client | Send me your token. |
+| 0 | a string | client to server | Here is my token. |
+| 1 | a string | server to client | Refused, and this is the reason. |
+| 2 | `read-write` or `readonly` | server to client | Accepted, with this permission. |
+
+The two texts `read-write` and `readonly` are on the wire. The provider compares
+them letter for letter.
+
+### The session state machine
+
+```text
+                     a new session
+                          │
+     any message that is not an Auth message
+                          │
+                          └──→ the server answers "send me your token"
+                          │
+              the client sends its token
+                          │
+                 your Authenticator runs
+                          │
+       ┌──────────────────┴──────────────────┐
+       │                                     │
+  it throws                            it returns
+  AuthenticationFailed                 Authenticated
+       │                                     │
+  "refused", with your text            "accepted", with the scope
+  The session stays closed.            The session is open.
+  The client can try again.
+                                             │
+                                             ▼
+                                     an open session
+```
+
+An open session answers each message this way:
+
+| Message from the browser | What the session does |
+|---|---|
+| Sync step 1 | Answers with the state that the browser does not have |
+| Sync step 2, or an update | Merges it (read-write) or judges it (read-only), then answers `SyncStatus` |
+| Awareness | Keeps it, and answers nothing. The hub sends it to the others. |
+| QueryAwareness | Answers with the presence that **this** connection introduced, or nothing |
+| Stateless | Nothing |
+| Close | Nothing. The hub removes this document from the connection. |
+
+One connection has one session for each document. A person who authenticates for
+document A gets nothing for document B. The browser uses one socket for every
+document, so this rule is what keeps the documents apart.
+
+### Which messages reach the other persons
+
+The session answers the person who spoke. The hub tells everybody else. It does
+not tell them about everything:
+
+| Message | Does it reach the other persons? |
+|---|---|
+| Sync step 1 | No. It asks a question. It says nothing. |
+| Sync step 2 | Yes, if the server accepted it |
+| Sync update | Yes, if the server accepted it |
+| Awareness | Yes, and it also goes back to the person who sent it |
+| SyncStatus | No. It goes only to the person who sent the change. |
+| Stateless | No. Nothing at all happens. |
+| Close, QueryAwareness | No |
+
+Two rules control this table.
+
+**Who is in the document.** The hub keeps a list of the connections in each
+document, and a connection joins that list at the moment its handshake for that
+document succeeds. So a connection that names a document without a token
+receives nothing about it. The same rule works the other way: the hub relays
+nothing on behalf of a connection whose session is not authenticated, which is
+what stops a stranger from putting a cursor with a name of their choice in front
+of everybody.
+
+**Whether the server took the change.** The hub looks for the `SyncStatus`
+answer that the session produced. If the answer is "refused", or if there is no
+answer at all, the change reaches nobody. Without this rule a person with
+read-only permission could send changes to every other person through a server
+that refused to keep them.
+
+### The read-only rule
+
+A read-only person still completes the full handshake. The handshake requires
+the browser to answer the sync step 1 of the server with a sync step 2. So a
+read-only browser **does** send updates, and refusing all of them would break a
+handshake that the person is allowed to complete.
+
+The server therefore does not ask "did an update arrive?" It asks "would this
+update change anything?"
+
+| The update | The answer |
+|---|---|
+| Holds only state that the server already has | Accepted, and nothing changes |
+| Holds nothing | Accepted, and nothing changes |
+| Holds state that the server does not have | **Refused.** The document does not change and no other person sees it. |
+
+This decision lives in `ReadOnlyPolicy` in the `hemp/yjs` package. It only
+decides. The session acts.
+
+### Awareness and departure
+
+Awareness travels by relay. Each session keeps only the presence that its own
+connection introduced. When a connection sends an awareness update, the hub
+passes that same frame to every connection in the document, the sender
+included.
+
+The echo to the sender looks wasteful and holds the connection open. The
+provider closes a socket that it has received nothing on for 30 seconds, and it
+counts only the frames that arrive, so its own awareness does not postpone the
+timer. One person alone in a document sends awareness every 15 seconds. Without
+the echo that person receives nothing between edits, and the browser drops the
+connection and builds it again in a loop. Hocuspocus sends awareness to every
+connection for the same reason. A document update behaves differently: the
+sender already has it, and the sync answer goes back anyway.
+
+When a socket goes away, the server must speak for the person who left, because
+a dropped socket sends no message of its own. The hub does this:
+
+1. It asks the session which awareness clients this connection introduced.
+2. It builds a removal for exactly those clients.
+3. It sends the removal to the other connections in the document.
+
+A connection can only ever retract its own clients. If it could retract any
+client, one person could remove another person from the cursor list.
+
+### Where each limit acts
+
+| Limit | Where it acts | What happens when a message goes past it |
+|---|---|---|
+| `limits.frame_bytes` | The WebSocket layer, before the bytes are collected | The server ends that one connection. See the note below. |
+| `limits.awareness_clients` | The frame reader, and the awareness store | The frame does not decode. The server closes that connection with code 1008. |
+| `limits.awareness_state_bytes` | The frame reader, and the awareness store | The same |
+
+The frame size limit acts on the announced length, not on the collected bytes. A
+browser that announces a very large frame is cut off before the server holds it
+in memory.
+
+The WebSocket layer makes a close message with code 1009 for a frame that is too
+large, but the server does not send that message. It ends the socket. So the
+browser sees a connection that stopped, with no reason. The awareness limits and
+the decode failures are different: the server sends code 1008 with a reason, and
+the browser can read it.
+
+The `hemp/yjs` decoder has its own limits for depth, element count, and total
+allocation. They are not settings of this package. They use the defaults of that
+package.
+
+### Close codes
+
+| Code | Name | Does the provider try again? | When the server sends it |
+|---|---|---|---|
+| 1008 | Policy Violation | No | A frame did not decode. The server sends this one. |
+| 1009 | Message Too Big | No | A frame went past `limits.frame_bytes`. The WebSocket layer makes it, but the server ends the socket instead of sending it. |
+| 1012 | Service Restart | Yes | Defined, not sent yet |
+| 4205 | Reset Connection | Yes | Defined, not sent yet |
+| 4401 | Unauthorized | No | Defined, not sent yet |
+| 4403 | Forbidden | No | Defined, not sent yet |
+
+The code matters. A permanent refusal sent with a code that means "try again"
+gives you a browser that reconnects for ever.
+
+A refused token does **not** close the connection. The server answers with an
+authentication message that says "refused". The provider stops asking for that
+document.
+
+### The compatibility profile
+
+This server targets exact client versions, and it says so in code rather than
+only in prose:
+
+| Package | Version |
+|---|---|
+| `@hocuspocus/provider` | 3.4.4 |
+| `yjs` | 13.6.29 |
+| `y-protocols` | 1.0.7 |
+| `lib0` | 0.2.117 |
+
+`php artisan collab:start` prints this profile when it starts.
+
+Profile 2 will add provider version 4. Version 4 changes enough to need its own
+entry: an optional version field in the authentication, document addresses of
+the form `documentName` + NUL + `sessionId`, and one-byte ping frames. None of
+that works here. A version 4 client fails in a way you can see, which is better
+than working half way.
+
+The `fixtures/profile-1/provider-transcripts.json` file holds one recorded frame
+for each message type. The tests read every frame and write each one again, and
+the bytes must be identical. See
+[How to work on this package](#how-to-work-on-this-package).
 
 ## The two classes you write
 
@@ -406,6 +757,20 @@ Two rules to remember:
   throws an exception, the server does not send that message, and the browser
   keeps the change and sends it again.
 
+### How to bind them without the config file
+
+Both classes come out of the Laravel container. Name them in the config file, or
+bind the interfaces yourself in a service provider and leave the config keys
+empty:
+
+```php
+$this->app->singleton(\Hemp\Collab\Server\Authenticator::class, DocumentAuthenticator::class);
+$this->app->singleton(\Hemp\Collab\Server\DocumentStore::class, DocumentStore::class);
+```
+
+Use this when your class needs constructor arguments that the container cannot
+guess.
+
 ## Settings
 
 The settings file is `config/collab.php`. To change it, copy it to your
@@ -419,7 +784,7 @@ php artisan vendor:publish --tag=collab-config
 |---|---|---|---|
 | `host` | `COLLAB_HOST` | `127.0.0.1` | The address of the server |
 | `port` | `COLLAB_PORT` | `1234` | The port of the server |
-| `hostname` | `COLLAB_HOSTNAME` | none | Site name; finds a Herd or Valet certificate for it |
+| `hostname` | `COLLAB_HOSTNAME` | the host in `APP_URL` | Site name; finds a Herd or Valet certificate for it |
 | `options.tls.local_cert` | `COLLAB_TLS_CERT` | none | Certificate file; set it and the server speaks `wss://` |
 | `options.tls.local_pk` | `COLLAB_TLS_KEY` | none | Private key file, if it is not in the certificate file |
 | `options.tls.passphrase` | `COLLAB_TLS_PASSPHRASE` | none | Passphrase, if the key has one |
@@ -454,16 +819,28 @@ To use a different address or port:
 php artisan collab:start --host=0.0.0.0 --port=4000
 ```
 
+The command line wins over the settings file.
+
 The command shows this text:
 
 ```text
   INFO  Collaboration server listening on tcp://127.0.0.1:1234
 
+  Clients connect with ......................... ws:// (no TLS here)
   Compatibility ... Profile 1: @hocuspocus/provider 3.4.4, yjs 13.6.29, …
 ```
 
-To stop the server, press `Ctrl+C`. The server stops new connections first, then
-completes the work that is in progress.
+The second line says `wss:// (this server terminates TLS)` when you give the
+server a certificate.
+
+To stop the server, press `Ctrl+C`. The server does this:
+
+1. It stops accepting new connections.
+2. It gives the work that is in progress one second to complete.
+3. It stops.
+
+`SIGTERM` does the same thing, so Supervisor and Docker stop the server the same
+way.
 
 **Important:** this process reads your PHP code one time, at the start. If you
 change your code, stop the server and start it again. Add this step to your
@@ -500,6 +877,18 @@ COLLAB_TLS_CERT=/path/to/certificate.pem
 COLLAB_TLS_KEY=/path/to/private-key.pem
 ```
 
+```bash
+php artisan collab:start --host=0.0.0.0 --port=8443
+```
+
+```js
+url: 'wss://example.com:8443'
+```
+
+Use this on a platform that does not let you configure a web server, for example
+Laravel Cloud and most managed hosts. There is nowhere to put a proxy there, so
+a server that cannot terminate TLS cannot be reached at all.
+
 In local development you usually set nothing at all. The hostname defaults to
 the host in `APP_URL`, and if Herd or Valet has secured that site, its
 certificate is found and used. A secured site therefore serves `wss://` with no
@@ -512,18 +901,6 @@ application:
 COLLAB_HOSTNAME=collab.my-app.test
 ```
 
-```bash
-php artisan collab:start --host=0.0.0.0 --port=443
-```
-
-```js
-url: 'wss://example.com:8443'
-```
-
-Use this on a platform that does not let you configure a web server — Laravel
-Cloud and most managed hosts. There is nowhere to put a proxy there, so a server
-that cannot terminate TLS cannot be reached at all.
-
 If the certificate file holds a chain, put the server's own certificate first
 and each issuer after it. `COLLAB_TLS_KEY` is not necessary when the key is in
 the same file. The server checks both files at start and refuses to start if
@@ -533,8 +910,8 @@ TLS is on when a certificate is present and off when it is not. There is no
 separate switch to keep in agreement with it.
 
 `config/collab.php` holds these under `options.tls`, and they are PHP's own SSL
-context options, so anything PHP accepts can be set — `verify_peer`, `ciphers`,
-`cafile`, and the rest. This is the same shape Reverb uses, on purpose: an
+context options, so anything PHP accepts can be set: `verify_peer`, `ciphers`,
+`cafile`, and the rest. This is the same shape that Reverb uses, on purpose. An
 application often runs both servers, and they should not disagree about how a
 certificate is named or where a local one is found.
 
@@ -554,8 +931,8 @@ location /collab {
 }
 ```
 
-Leave `COLLAB_TLS_CERTIFICATE` empty in this case. The proxy does the
-encryption and the server speaks plain WebSocket behind it.
+Leave `COLLAB_TLS_CERT` empty in this case. The proxy does the encryption and
+the server speaks plain WebSocket behind it.
 
 ### Use one server only
 
@@ -565,6 +942,37 @@ each other.
 
 One server is sufficient for many documents and many persons. If you need more
 than one machine, this package is not ready for you yet.
+
+### A checklist before you go live
+
+- [ ] The document column is binary, and it is large enough.
+- [ ] `COLLAB_AUTHENTICATOR` and `COLLAB_STORE` use single quotation marks.
+- [ ] Supervisor, or another program, starts the server again if it stops.
+- [ ] The browser uses `wss://` if the page uses `https://`.
+- [ ] The read timeout of the proxy is much more than 60 seconds.
+- [ ] Your deployment procedure restarts the server after each code change.
+- [ ] You read [Limits of this version](#limits-of-this-version).
+
+## Commands
+
+For your application:
+
+| Command | Function |
+|---|---|
+| `php artisan collab:start` | Start the server |
+| `php artisan collab:start --host=0.0.0.0` | Start it on a different address |
+| `php artisan collab:start --port=4000` | Start it on a different port |
+| `php artisan vendor:publish --tag=collab-config` | Copy `config/collab.php` into your application |
+
+For work on this package:
+
+| Command | Function |
+|---|---|
+| `composer test` | Check the formatting, then run every test |
+| `composer test:lint` | Check the formatting only |
+| `composer test:unit` | Run every test only |
+| `composer lint` | Correct the formatting |
+| `composer fixtures` | Build the provider transcripts again. Needs Node.js. |
 
 ## Questions and answers
 
@@ -580,9 +988,9 @@ No. Use the usual `@hocuspocus/provider` package. Change only the `url` value.
 
 ### Can I use this on Laravel Cloud, or another host with no web server config?
 
-Yes. Give the server a certificate with `COLLAB_TLS_CERTIFICATE` and it speaks
-`wss://` on its own. A reverse proxy is one way to add encryption, not the only
-one, and it is not available on those platforms.
+Yes. Give the server a certificate with `COLLAB_TLS_CERT` and it speaks `wss://`
+on its own. A reverse proxy is one way to add encryption, not the only one, and
+it is not available on those platforms.
 
 ### Do I need Node.js?
 
@@ -598,7 +1006,8 @@ is here". Each browser then does something. They do not merge text.
 This package merges text. Two persons type in the same line at the same time and
 both changes stay. Reverb cannot do this.
 
-You can use both in the same application. Give them different ports.
+You can use both in the same application. Give them different ports. This package
+imports nothing from Reverb. The two share the container and nothing else.
 
 ### Do I need Redis?
 
@@ -627,8 +1036,10 @@ changes from that person and sends them to nobody.
 
 ### How do I stop a person from opening a document?
 
-Throw `AuthenticationFailed` from your `Authenticator`. The server closes the
-connection for that document.
+Throw `AuthenticationFailed` from your `Authenticator`. The server answers
+"refused" for that document, and the provider stops asking for it. The
+connection itself stays open, because the browser can have other documents on
+it.
 
 ### Can I let a person add comments but not change the text?
 
@@ -645,19 +1056,6 @@ permissions.
 The default limit for one message is 16 MB. A document of usual text is much
 smaller. A document grows when persons edit it, also when they delete text,
 because Yjs keeps a record of the deletions.
-
-### The browser does not connect. What must I do?
-
-Look at these items in this order:
-
-1. Is the server running? Look for the `INFO` line.
-2. Is the port correct in the browser and in the settings?
-3. Does the page use HTTPS? Then the browser needs `wss://`, not `ws://`. A
-   browser refuses a `ws://` connection from an HTTPS page.
-4. Is a reverse proxy in front of the server? Then it needs the two `proxy_set_header`
-   lines that this document shows.
-5. Does your `Authenticator` throw an exception? Look in the browser console for
-   the refusal text.
 
 ### Can I use a different database, or a file, or S3?
 
@@ -681,6 +1079,113 @@ The browser uses one connection for all the documents that a person opens. If
 one token opened all of them, a person with permission for one document could
 open every other document.
 
+### How many persons can one document hold?
+
+There is no fixed limit. The practical limit is the memory and the processor of
+the one machine. Each change is sent to each other connection in the document,
+so the work grows with the square of the number of persons in one document.
+
+## Troubleshooting
+
+### The browser does not connect
+
+Look at these items in this order:
+
+1. Is the server running? Look for the `INFO` line.
+2. Is the port correct in the browser and in the settings?
+3. Does the page use HTTPS? Then the browser needs `wss://`, not `ws://`. A
+   browser refuses a `ws://` connection from an HTTPS page.
+4. Is a reverse proxy in front of the server? Then it needs the two
+   `proxy_set_header` lines that this document shows.
+5. Does your `Authenticator` throw an exception? Look in the browser console for
+   the refusal text.
+
+### `Failed to parse dotenv file`
+
+**Cause:** you used double quotation marks around a class name in `.env`.
+Laravel reads `\C` as a special character.
+
+**Correction:** use single quotation marks.
+
+```env
+COLLAB_AUTHENTICATOR='App\Collaboration\DocumentAuthenticator'
+```
+
+### `collab.authenticator is not configured`
+
+**Cause:** the setting is empty, and nothing bound the interface.
+
+**Correction:** set `COLLAB_AUTHENTICATOR` in `.env`, or bind
+`Hemp\Collab\Server\Authenticator` in a service provider. The same applies to
+`collab.store` and `Hemp\Collab\Server\DocumentStore`.
+
+### `found hemp/yjs[dev-main] but it does not match your minimum-stability`
+
+**Cause:** you named only one package in the `composer require` command.
+
+**Correction:** name both.
+
+```bash
+composer require hemp/collab:@dev hemp/yjs:@dev
+```
+
+### `The TLS file [...] does not exist or cannot be read`
+
+**Cause:** the certificate path or the key path is wrong, or the user that runs
+the server cannot read the file.
+
+**Correction:** correct the path, or give the user permission to read the file.
+The server makes this check at the start, on purpose. A path that fails later
+shows as a handshake error in the browser and as nothing in the server log.
+
+### The connection closes after some seconds, and always at the same time
+
+**Cause:** the read timeout of the reverse proxy. The default of nginx is 60
+seconds, and a person who reads a document sends nothing in that time.
+
+**Correction:** raise `proxy_read_timeout`.
+
+### The connection closes immediately after the first message
+
+**Cause:** the server could not decode the frame, so it closed the connection
+with code 1008 and a reason. Read the reason in the browser console. The reader
+takes a whole frame or nothing, so it cannot skip a bad one and continue.
+
+A connection that ends with no code and no reason is a different fault: the
+frame went past `limits.frame_bytes`.
+
+**Correction:** check the version of `@hocuspocus/provider`. Version 4 sends
+frames that this server does not understand. Use version 3.
+
+### A change in my PHP code does nothing
+
+**Cause:** the server read your code one time, when it started.
+
+**Correction:** stop the server and start it again.
+
+### `Address already in use`
+
+**Cause:** another program has the port, often an older copy of this server.
+
+**Correction:** stop the other program, or use `--port` with a free port.
+
+### One browser sees the text and the other does not
+
+Look at the `SyncStatus` answer in the browser console. If the server refused the
+change, that browser has read-only permission, and the change reaches nobody.
+This is correct behavior. Look at your `Authenticator`.
+
+### A cursor stays on the screen after the person left
+
+The server sends a removal when the socket closes. If the socket did not close,
+for example because a proxy holds it open, the removal does not go out. Look at
+the timeouts of the proxy.
+
+### A person who joins late sees no cursors
+
+This is a known limit, not a fault. See
+[Limits of this version](#limits-of-this-version).
+
 ## Limits of this version
 
 Read this list before you use the package for real documents.
@@ -690,10 +1195,12 @@ Read this list before you use the package for real documents.
 | The document is written for each change | Many writes to the database while a person types. This is correct but not fast. |
 | One process only | You cannot use two servers behind a load balancer. |
 | A slow browser has no limit | A browser that receives data slowly uses memory on the server. |
+| A person who joins late sees no cursors at once | `QueryAwareness` answers with the presence of the asking connection only. The other cursors appear when those persons next move, which the provider does about every 15 seconds. |
 | The real-provider test is manual | It needs an application and a running server, so `composer test` does not include it. See [How to run the tests](#how-to-run-the-tests). |
-| No certificate reloading | A renewed certificate is picked up when the server restarts, not before. |
+| No certificate reloading | A renewed certificate is used when the server restarts, not before. |
 | Stateless messages do nothing | The server reads the `Stateless` message type but sends it to nobody. |
 | Provider version 4 does not work | Use `@hocuspocus/provider` version 3. |
+| No events | The `identity` value goes no further than the session. |
 
 ## How to run the tests
 
@@ -702,13 +1209,31 @@ composer install
 composer test
 ```
 
-The tests need no Node.js and no network. There are three groups:
+This checks the formatting and then runs 131 tests. They need no Node.js and no
+network. They take about one second.
 
-| Group | What it tests |
-|---|---|
-| `tests/Protocol` | The message format, byte for byte |
-| `tests/Server` | The rules, and the server on a real port |
-| `tests/Laravel` | A small Laravel application that starts the server and connects to it |
+There are three groups:
+
+| Group | What it tests | Needs an application? |
+|---|---|---|
+| `tests/Protocol` | The message format, byte for byte, against the recorded provider frames | No |
+| `tests/Server` | The rules, and the server on a real port | No |
+| `tests/Laravel` | A small Laravel application that starts the server and connects to it | Yes |
+
+Only the Laravel group has an application under it. Everything else runs without
+one, on purpose: the rules do not depend on a framework, so the tests should not
+either.
+
+To run one group:
+
+```bash
+vendor/bin/pest --testsuite=Protocol
+vendor/bin/pest tests/Server/HubTest.php
+```
+
+Some helper functions live in the test file that uses them, not in `Pest.php`.
+If a single file fails with `Call to undefined function hub()`, run the whole
+group instead.
 
 ### The test with a real browser client
 
@@ -719,8 +1244,13 @@ an application, and a running server:
 ```bash
 npm --prefix tools/oracle ci
 php artisan collab:start --port=7788     # in your application, in another terminal
+```
 
+```bash
 node tools/oracle/e2e-provider.mjs ws://127.0.0.1:7788 <document> <token>
+```
+
+```bash
 node tools/oracle/e2e-readonly.mjs ws://127.0.0.1:7788 <document> <owner-token> <reader-token>
 ```
 
@@ -729,9 +1259,76 @@ makes two changes at the same time, sends a cursor, connects a third client
 late, and gives a bad token. The second script shows that text from a read-only
 client reaches nobody.
 
+## How to work on this package
+
+### The two packages
+
 The Yjs format itself is in a different package,
 [hemp/yjs](https://github.com/davidhemphill/yjs-php). That package holds the
-merge code. It knows nothing about Laravel, WebSockets, or Hocuspocus.
+merge code, the binary formats, and the read-only decision. It knows nothing
+about Laravel, WebSockets, or Hocuspocus.
+
+While the two packages are unpublished, `composer.json` points at a path:
+
+```json
+{
+    "repositories": [
+        { "type": "path", "url": "../yjs-php", "options": { "symlink": true } }
+    ]
+}
+```
+
+So `yjs-php` must sit beside this checkout:
+
+```text
+GitHub/
+├── collab/
+└── yjs-php/
+```
+
+Continuous integration checks out both for the same reason.
+
+### The transcripts
+
+`fixtures/profile-1/provider-transcripts.json` holds one frame for each message
+type. The tests read every frame, write each one again, and require identical
+bytes.
+
+The frames are built from the same packages that the provider builds them from:
+`@hocuspocus/common`, `y-protocols`, and `lib0`, following the frame
+construction in each `OutgoingMessage` class of the provider. They are **not**
+recorded from a running provider. The provider does not export those classes,
+and driving a live one needs a server to connect to. This is a real limit, and
+the two end-to-end scripts above exist to cover it.
+
+To build them again:
+
+```bash
+npm --prefix tools/oracle ci
+composer fixtures
+```
+
+The generator writes no timestamp. So any difference in the output is a real
+difference in the protocol, not noise. Continuous integration builds the
+transcripts again on each change and fails if the committed files moved. If that
+job fails, read the difference and decide whether the compatibility profile must
+change.
+
+### Continuous integration
+
+| Job | What it does |
+|---|---|
+| `php` | Checks out both packages, then runs Pint and Pest on PHP 8.4 and 8.5 |
+| `transcripts` | Builds the provider transcripts again and fails if they moved |
+
+### Formatting
+
+```bash
+composer lint
+```
+
+Pint with the Laravel preset. Continuous integration fails on a difference, so
+run this before you commit.
 
 ---
 
