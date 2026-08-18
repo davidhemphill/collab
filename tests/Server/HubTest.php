@@ -222,6 +222,28 @@ it('relays presence to the others', function () {
         ->and($received[0]->message->update->entries[0]->client)->toBe(7);
 });
 
+it('echoes presence back to its sender, which keeps a lone editor connected', function () {
+    // @hocuspocus/provider force-closes a socket it has received nothing on for
+    // 30 seconds. A single editor in a document sends awareness every 15s and
+    // would otherwise hear nothing back between edits, so it drops and
+    // reconnects on a loop. The echo is the keepalive.
+    [$hub] = hub();
+    $alice = client($hub, 'a');
+
+    authenticated($hub, $alice);
+    $alice->drain();
+
+    say($hub, $alice, new Awareness(new AwarenessUpdate([
+        new AwarenessEntry(7, 1, '{"name":"Ada"}'),
+    ])));
+
+    $received = $alice->drain();
+
+    expect($received)->toHaveCount(1)
+        ->and($received[0]->message)->toBeInstanceOf(Awareness::class)
+        ->and($received[0]->message->update->entries[0]->client)->toBe(7);
+});
+
 it('retracts a departed connection\'s presence', function () {
     // A dropped socket produces no message of its own, so the server has to
     // announce the departure on the client's behalf or its cursor never leaves.

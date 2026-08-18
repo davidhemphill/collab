@@ -147,7 +147,22 @@ final class Hub
             return;
         }
 
-        foreach ($this->peers($frame->documentName, $sender) as $peer) {
+        // Awareness goes back to the sender too, which looks redundant and is
+        // load-bearing: @hocuspocus/provider force-closes a socket it has heard
+        // nothing on for messageReconnectTimeout (30s), counting only frames it
+        // received — "not even your own Awareness updates", as its own source
+        // puts it. A lone editor sends awareness every 15s and, without the
+        // echo, receives nothing between edits, so the client drops and
+        // reconnects on a loop. Hocuspocus itself broadcasts awareness to every
+        // connection including the origin (handleAwarenessUpdate iterates
+        // getConnections() with no exclusion); matching that is what keeps a
+        // solo session alive. Document updates stay peers-only: echoing a
+        // client's own update back is pure waste, and sync already answers it.
+        $recipients = $message instanceof Awareness
+            ? $this->peers($frame->documentName)
+            : $this->peers($frame->documentName, $sender);
+
+        foreach ($recipients as $peer) {
             $peer->send($frame);
         }
     }
