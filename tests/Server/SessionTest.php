@@ -11,12 +11,15 @@ use Hemp\Collab\Protocol\Message\SyncStatus;
 use Hemp\Collab\Protocol\Scope;
 use Hemp\Collab\Server\Authenticated;
 use Hemp\Collab\Server\DocumentStore;
+use Hemp\Collab\Server\Reception;
 use Hemp\Collab\Server\Session;
 use Hemp\Yjs\Id\StateVector;
 use Hemp\Yjs\Protocol\Awareness\AwarenessEntry;
+use Hemp\Yjs\Protocol\Awareness\AwarenessStore;
 use Hemp\Yjs\Protocol\Awareness\AwarenessUpdate;
 use Hemp\Yjs\Protocol\Sync\SyncStep1;
 use Hemp\Yjs\Protocol\Sync\SyncStep2;
+use Hemp\Yjs\Protocol\Sync\SyncUpdate;
 use Hemp\Yjs\Update\Update;
 
 /**
@@ -27,7 +30,7 @@ use Hemp\Yjs\Update\Update;
  * protocol logic is exercised here and the host application's policy is
  * exercised where that policy lives.
  */
-function open(Session $session, string $document = '4711', string $token = 'good'): array
+function open(Session $session, string $document = '4711', string $token = 'good'): Reception
 {
     return $session->receive(new AddressedFrame($document, Authentication::token($token)));
 }
@@ -36,9 +39,9 @@ describe('handshake', function () {
     it('grants the scope the authenticator returns', function () {
         $session = new Session(authenticatorGranting(Scope::ReadOnly), memoryStore());
 
-        $replies = open($session);
+        $reception = open($session);
 
-        expect($replies[0]->message->scope)->toBe(Scope::ReadOnly)
+        expect($reception->replies[0]->message->scope)->toBe(Scope::ReadOnly)
             ->and($session->scope())->toBe(Scope::ReadOnly)
             ->and($session->documentName())->toBe('4711');
     });
@@ -55,29 +58,29 @@ describe('handshake', function () {
     it('relays a refusal without inventing a reason of its own', function () {
         $session = new Session(authenticatorGranting(Scope::ReadWrite), memoryStore());
 
-        $replies = open($session, token: 'wrong');
+        $reception = open($session, token: 'wrong');
 
-        expect($replies[0]->message->authType->name)->toBe('PermissionDenied')
-            ->and($replies[0]->message->reason)->toBe('Invalid token.')
+        expect($reception->replies[0]->message->authType->name)->toBe('PermissionDenied')
+            ->and($reception->replies[0]->message->reason)->toBe('Invalid token.')
             ->and($session->isAuthenticated())->toBeFalse();
     });
 
     it('asks for a token before answering anything else', function () {
         $session = new Session(authenticatorGranting(Scope::ReadWrite), memoryStore());
 
-        $replies = $session->receive(
+        $reception = $session->receive(
             new AddressedFrame('4711', new Sync(new SyncStep1(StateVector::empty()))),
         );
 
-        expect($replies[0]->message->isTokenRequest())->toBeTrue();
+        expect($reception->replies[0]->message->isTokenRequest())->toBeTrue();
     });
 
     it('ignores a token request sent the wrong way', function () {
         $session = new Session(authenticatorGranting(Scope::ReadWrite), memoryStore());
 
-        $replies = $session->receive(new AddressedFrame('4711', Authentication::tokenRequest()));
+        $reception = $session->receive(new AddressedFrame('4711', Authentication::tokenRequest()));
 
-        expect($replies[0]->message->authType->name)->toBe('PermissionDenied')
+        expect($reception->replies[0]->message->authType->name)->toBe('PermissionDenied')
             ->and($session->isAuthenticated())->toBeFalse();
     });
 });
@@ -90,12 +93,12 @@ describe('syncing', function () {
         $session = new Session(authenticatorGranting(Scope::ReadWrite), $store);
         open($session);
 
-        $replies = $session->receive(
+        $reception = $session->receive(
             new AddressedFrame('4711', new Sync(new SyncStep1(StateVector::empty()))),
         );
 
-        expect($replies[1]->message->message)->toBeInstanceOf(SyncStep2::class)
-            ->and($replies[1]->message->message->update()->structCount())
+        expect($reception->replies[1]->message->message)->toBeInstanceOf(SyncStep2::class)
+            ->and($reception->replies[1]->message->message->update()->structCount())
             ->toBe(seeded()->structCount());
     });
 
@@ -109,15 +112,15 @@ describe('syncing', function () {
         $session = new Session(authenticatorGranting(Scope::ReadWrite), $store);
         open($session);
 
-        $replies = $session->receive(
+        $reception = $session->receive(
             new AddressedFrame('4711', new Sync(new SyncStep1(StateVector::empty()))),
         );
 
-        expect($replies)->toHaveCount(2)
-            ->and($replies[0]->message->message)->toBeInstanceOf(SyncStep1::class)
-            ->and($replies[0]->message->message->stateVector->encode())
+        expect($reception->replies)->toHaveCount(2)
+            ->and($reception->replies[0]->message->message)->toBeInstanceOf(SyncStep1::class)
+            ->and($reception->replies[0]->message->message->stateVector->encode())
             ->toBeBytes(seeded()->stateVector()->encode())
-            ->and($replies[1]->message->message)->toBeInstanceOf(SyncStep2::class);
+            ->and($reception->replies[1]->message->message)->toBeInstanceOf(SyncStep2::class);
     });
 
     it('asks for state even when it holds none', function () {
@@ -126,11 +129,11 @@ describe('syncing', function () {
         $session = new Session(authenticatorGranting(Scope::ReadWrite), memoryStore());
         open($session);
 
-        $replies = $session->receive(
+        $reception = $session->receive(
             new AddressedFrame('4711', new Sync(new SyncStep1(StateVector::empty()))),
         );
 
-        expect($replies[0]->message->message)->toBeInstanceOf(SyncStep1::class);
+        expect($reception->replies[0]->message->message)->toBeInstanceOf(SyncStep1::class);
     });
 
     it('merges a writer update into the store', function () {
@@ -138,13 +141,18 @@ describe('syncing', function () {
         $session = new Session(authenticatorGranting(Scope::ReadWrite), $store);
         open($session);
 
-        $replies = $session->receive(
+        $reception = $session->receive(
             new AddressedFrame('4711', new Sync(SyncStep2::of(seeded()))),
         );
 
-        expect($replies[0]->message)->toBeInstanceOf(SyncStatus::class)
-            ->and($replies[0]->message->applied)->toBeTrue()
-            ->and($store->load('4711')->contains(seeded()))->toBeTrue();
+        expect($reception->replies[0]->message)->toBeInstanceOf(SyncStatus::class)
+            ->and($reception->replies[0]->message->applied)->toBeTrue()
+            ->and($store->load('4711')->contains(seeded()))->toBeTrue()
+            // The change travels to the document as an Update — never as the
+            // step two it may have arrived as, which would tell every peer
+            // that its own question had been answered.
+            ->and($reception->broadcasts)->toHaveCount(1)
+            ->and($reception->broadcasts[0]->message->message)->toBeInstanceOf(SyncUpdate::class);
     });
 
     it('does not write an update that changes nothing', function () {
@@ -170,12 +178,15 @@ describe('syncing', function () {
         $session = new Session(authenticatorGranting(Scope::ReadWrite), $store);
         open($session);
 
-        $replies = $session->receive(
+        $reception = $session->receive(
             new AddressedFrame('4711', new Sync(SyncStep2::of(seeded()))),
         );
 
-        expect($replies[0]->message->applied)->toBeTrue()
-            ->and($writes)->toBe(0);
+        expect($reception->replies[0]->message->applied)->toBeTrue()
+            ->and($writes)->toBe(0)
+            // And nothing is said to the room: Yjs emits no update event when
+            // a document did not change, so Hocuspocus broadcasts nothing.
+            ->and($reception->broadcasts)->toBe([]);
     });
 
     it('refuses an update from a read-only session and stores nothing', function () {
@@ -183,12 +194,13 @@ describe('syncing', function () {
         $session = new Session(authenticatorGranting(Scope::ReadOnly), $store);
         open($session);
 
-        $replies = $session->receive(
+        $reception = $session->receive(
             new AddressedFrame('4711', new Sync(SyncStep2::of(seeded()))),
         );
 
-        expect($replies[0]->message->applied)->toBeFalse()
-            ->and($store->load('4711')->isEmpty())->toBeTrue();
+        expect($reception->replies[0]->message->applied)->toBeFalse()
+            ->and($store->load('4711')->isEmpty())->toBeTrue()
+            ->and($reception->broadcasts)->toBe([]);
     });
 
     it('acknowledges a read-only session echoing back state', function () {
@@ -201,11 +213,11 @@ describe('syncing', function () {
         $session = new Session(authenticatorGranting(Scope::ReadOnly), $store);
         open($session);
 
-        $replies = $session->receive(
+        $reception = $session->receive(
             new AddressedFrame('4711', new Sync(SyncStep2::of(seeded()))),
         );
 
-        expect($replies[0]->message->applied)->toBeTrue();
+        expect($reception->replies[0]->message->applied)->toBeTrue();
     });
 
     it('lets a read-only session read', function () {
@@ -215,11 +227,11 @@ describe('syncing', function () {
         $session = new Session(authenticatorGranting(Scope::ReadOnly), $store);
         open($session);
 
-        $replies = $session->receive(
+        $reception = $session->receive(
             new AddressedFrame('4711', new Sync(new SyncStep1(StateVector::empty()))),
         );
 
-        expect($replies[1]->message->message->update()->structCount())->toBeGreaterThan(0);
+        expect($reception->replies[1]->message->message->update()->structCount())->toBeGreaterThan(0);
     });
 
     it('reads the document it was opened for, not the one a frame names', function () {
@@ -231,11 +243,11 @@ describe('syncing', function () {
         $session = new Session(authenticatorGranting(Scope::ReadWrite), $store);
         open($session, document: '4711');
 
-        $replies = $session->receive(
+        $reception = $session->receive(
             new AddressedFrame('4711', new Sync(new SyncStep1(StateVector::empty()))),
         );
 
-        expect($replies[1]->message->message->update()->structCount())->toBeGreaterThan(0);
+        expect($reception->replies[1]->message->message->update()->structCount())->toBeGreaterThan(0);
     });
 });
 
@@ -253,19 +265,48 @@ describe('awareness', function () {
         expect($session->ownedClients())->toBe([7]);
     });
 
-    it('sends nothing back to the client that announced itself', function () {
-        // Fanning presence out to the other connections is the daemon's job.
+    it('does not come to own a client whose state the store rejected', function () {
+        // Every provider restates every state it receives, so a peer's
+        // presence arrives on this connection too — at a clock the shared
+        // store has already seen. Owning it would mean this connection's
+        // disconnect erased another person's cursor.
+        $shared = new AwarenessStore;
+
+        $first = new Session(authenticatorGranting(Scope::ReadWrite), memoryStore(), $shared);
+        $second = new Session(authenticatorGranting(Scope::ReadWrite), memoryStore(), $shared);
+        open($first);
+        open($second);
+
+        $ada = new AwarenessUpdate([new AwarenessEntry(7, 1, '{"name":"Ada"}')]);
+        $first->receive(new AddressedFrame('4711', new Awareness($ada)));
+        $second->receive(new AddressedFrame('4711', new Awareness($ada)));
+
+        expect($first->ownedClients())->toBe([7])
+            ->and($second->ownedClients())->toBe([]);
+    });
+
+    it('broadcasts an accepted state to the document, sender included', function () {
+        // Hocuspocus fans awareness out to every connection with no origin
+        // exclusion, and the echo is the heartbeat that keeps a lone client's
+        // socket alive. The broadcast is re-encoded from the store, so what
+        // the room hears is what the server accepted.
         $session = new Session(authenticatorGranting(Scope::ReadWrite), memoryStore());
         open($session);
 
-        $replies = $session->receive(new AddressedFrame('4711', new Awareness(
+        $reception = $session->receive(new AddressedFrame('4711', new Awareness(
             new AwarenessUpdate([new AwarenessEntry(7, 1, '{"name":"Ada"}')]),
         )));
 
-        expect($replies)->toBe([]);
+        expect($reception->replies)->toBe([])
+            ->and($reception->broadcasts)->toHaveCount(1)
+            ->and($reception->broadcasts[0]->message->update->entries[0]->client)->toBe(7)
+            ->and($reception->broadcasts[0]->message->update->entries[0]->state)->toBe('{"name":"Ada"}');
     });
 
-    it('answers a query with everyone it knows about', function () {
+    it('broadcasts a clock renewal even though nothing changed', function () {
+        // The renewal is the heartbeat: a client re-announces itself every
+        // fifteen seconds, and rebroadcasting it is what stops every peer's
+        // thirty-second expiry timer from firing on an idle cursor.
         $session = new Session(authenticatorGranting(Scope::ReadWrite), memoryStore());
         open($session);
 
@@ -273,16 +314,108 @@ describe('awareness', function () {
             new AwarenessUpdate([new AwarenessEntry(7, 1, '{"name":"Ada"}')]),
         )));
 
-        $replies = $session->receive(new AddressedFrame('4711', new QueryAwareness));
+        $reception = $session->receive(new AddressedFrame('4711', new Awareness(
+            new AwarenessUpdate([new AwarenessEntry(7, 2, '{"name":"Ada"}')]),
+        )));
 
-        expect($replies[0]->message)->toBeInstanceOf(Awareness::class)
-            ->and($replies[0]->message->update->entries[0]->client)->toBe(7);
+        expect($reception->broadcasts)->toHaveCount(1);
     });
 
-    it('says nothing when nobody is present', function () {
+    it('says nothing when the store accepted nothing', function () {
+        // A stale clock changes nothing, so nothing reaches the room.
+        // y-protocols emits no event here and Hocuspocus is silent; without
+        // this, each client's restatement of what it just heard would
+        // circulate through the room forever.
         $session = new Session(authenticatorGranting(Scope::ReadWrite), memoryStore());
         open($session);
 
-        expect($session->receive(new AddressedFrame('4711', new QueryAwareness)))->toBe([]);
+        $session->receive(new AddressedFrame('4711', new Awareness(
+            new AwarenessUpdate([new AwarenessEntry(7, 2, '{"name":"Ada"}')]),
+        )));
+
+        $reception = $session->receive(new AddressedFrame('4711', new Awareness(
+            new AwarenessUpdate([new AwarenessEntry(7, 2, '{"name":"Ada"}')]),
+        )));
+
+        expect($reception->broadcasts)->toBe([])
+            ->and($reception->replies)->toBe([]);
+    });
+
+    it('tells a newcomer who is already here', function () {
+        // Hocuspocus sends the document's presence the moment a connection is
+        // established. Without it, a person opening a busy document sees an
+        // empty room until each peer happens to renew.
+        $shared = new AwarenessStore;
+
+        $first = new Session(authenticatorGranting(Scope::ReadWrite), memoryStore(), $shared);
+        open($first);
+        $first->receive(new AddressedFrame('4711', new Awareness(
+            new AwarenessUpdate([new AwarenessEntry(7, 1, '{"name":"Ada"}')]),
+        )));
+
+        $second = new Session(authenticatorGranting(Scope::ReadWrite), memoryStore(), $shared);
+        $reception = open($second);
+
+        expect($reception->replies)->toHaveCount(2)
+            ->and($reception->replies[1]->message)->toBeInstanceOf(Awareness::class)
+            ->and($reception->replies[1]->message->update->entries[0]->client)->toBe(7);
+    });
+
+    it('tells a newcomer nothing when the room is empty', function () {
+        $session = new Session(authenticatorGranting(Scope::ReadWrite), memoryStore());
+
+        $reception = open($session);
+
+        expect($reception->replies)->toHaveCount(1);
+    });
+
+    it('answers a query with everyone present, not only its own clients', function () {
+        // Hocuspocus answers QueryAwareness with the document's entire
+        // awareness state — presence belongs to the document.
+        $shared = new AwarenessStore;
+
+        $first = new Session(authenticatorGranting(Scope::ReadWrite), memoryStore(), $shared);
+        $second = new Session(authenticatorGranting(Scope::ReadWrite), memoryStore(), $shared);
+        open($first);
+        open($second);
+
+        $first->receive(new AddressedFrame('4711', new Awareness(
+            new AwarenessUpdate([new AwarenessEntry(7, 1, '{"name":"Ada"}')]),
+        )));
+
+        $reception = $second->receive(new AddressedFrame('4711', new QueryAwareness));
+
+        expect($reception->replies[0]->message)->toBeInstanceOf(Awareness::class)
+            ->and($reception->replies[0]->message->update->entries[0]->client)->toBe(7);
+    });
+
+    it('answers a query even when nobody is present', function () {
+        // Hocuspocus replies with the awareness state it has, empty included.
+        $session = new Session(authenticatorGranting(Scope::ReadWrite), memoryStore());
+        open($session);
+
+        $reception = $session->receive(new AddressedFrame('4711', new QueryAwareness));
+
+        expect($reception->replies)->toHaveCount(1)
+            ->and($reception->replies[0]->message->update->isEmpty())->toBeTrue();
+    });
+
+    it('keeps the departed client\'s clock when retracting, so a stale message cannot reinstate it', function () {
+        $shared = new AwarenessStore;
+
+        $session = new Session(authenticatorGranting(Scope::ReadWrite), memoryStore(), $shared);
+        open($session);
+        $session->receive(new AddressedFrame('4711', new Awareness(
+            new AwarenessUpdate([new AwarenessEntry(7, 3, '{"name":"Ada"}')]),
+        )));
+
+        $removal = $session->retract([7]);
+
+        expect($removal->entries[0]->clock)->toBe(4)
+            ->and($shared->knows(7))->toBeFalse()
+            // The clock survives the departure: any message Ada sent before
+            // leaving loses to it, so her cursor cannot flicker back.
+            ->and($shared->clockFor(7))->toBe(4)
+            ->and($session->ownedClients())->toBe([]);
     });
 });

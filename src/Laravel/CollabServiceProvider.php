@@ -9,6 +9,7 @@ use Hemp\Collab\Protocol\FrameReader;
 use Hemp\Collab\Server\Authenticator;
 use Hemp\Collab\Server\DocumentStore;
 use Hemp\Collab\Server\Hub;
+use Hemp\Collab\Server\ResidentDocuments;
 use Hemp\Collab\Server\SessionFactory;
 use Hemp\Collab\Server\SharedSessionFactory;
 use Hemp\Yjs\Protocol\Awareness\AwarenessLimits;
@@ -49,7 +50,6 @@ class CollabServiceProvider extends ServiceProvider implements DeferrableProvide
         $this->app->singleton(SessionFactory::class, fn ($app) => new SharedSessionFactory(
             $app->make(Authenticator::class),
             $app->make(DocumentStore::class),
-            $app->make(AwarenessLimits::class),
         ));
 
         // Both halves of the same policy: the reader refuses an oversized
@@ -58,6 +58,7 @@ class CollabServiceProvider extends ServiceProvider implements DeferrableProvide
             $app->make(SessionFactory::class),
             new FrameReader(awarenessLimits: $app->make(AwarenessLimits::class)),
             $app->make(LoggerInterface::class),
+            new ResidentDocuments($app->make(AwarenessLimits::class)),
         ));
     }
 

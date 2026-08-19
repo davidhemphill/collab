@@ -4,16 +4,13 @@ declare(strict_types=1);
 
 namespace Hemp\Collab\Server;
 
+use Closure;
 use Hemp\Collab\Protocol\AddressedFrame;
 use Hemp\Collab\Protocol\CloseEvent;
 use Hemp\Collab\Protocol\FrameReader;
 use Hemp\Collab\Protocol\Message\Awareness;
 use Hemp\Collab\Protocol\Message\Close;
-use Hemp\Collab\Protocol\Message\Sync;
-use Hemp\Collab\Protocol\Message\SyncStatus;
 use Hemp\Yjs\Exception\DecodeException;
-use Hemp\Yjs\Protocol\Sync\SyncStep2;
-use Hemp\Yjs\Protocol\Sync\SyncUpdate;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Throwable;
@@ -21,10 +18,17 @@ use Throwable;
 /**
  * Routes frames between connections.
  *
- * A {@see Session} answers the client that spoke. The other half of a
- * collaboration server is telling everyone *else* — and that is all this does:
- * decode, hand to the right session, send its replies back, and fan the
- * accepted change out to the document's other connections.
+ * A {@see Session} decides; this delivers. The session hands back a
+ * {@see Reception} that already separates answers from news, so the hub never
+ * inspects a frame to work out who should hear it — it sends replies to the
+ * connection that spoke and broadcasts to every connection with the document
+ * open, the sender included, which is exactly Hocuspocus's delivery: no
+ * origin exclusion on updates or awareness.
+ *
+ * Broadcasts go out before replies. For an accepted update that means the
+ * echo reaches the sender ahead of its acknowledgement, which is the order
+ * Hocuspocus produces — the broadcast happens while the update is applied,
+ * the status is written after.
  *
  * Deliberately transport-free, like everything under it. The socket runtime
  * feeds it strings and it never learns where they came from.
@@ -46,18 +50,32 @@ final class Hub
      */
     private array $subscribers = [];
 
+    private readonly ResidentDocuments $residents;
+
     public function __construct(
         private readonly SessionFactory $sessions,
         private readonly FrameReader $frames = new FrameReader,
         private readonly LoggerInterface $log = new NullLogger,
-    ) {}
+        ?ResidentDocuments $residents = null,
+    ) {
+        $this->residents = $residents ?? new ResidentDocuments;
+    }
 
     /**
-     * The factory a connection builds its per-document sessions with.
+     * The builder a connection makes its per-document sessions with.
+     *
+     * The hub wraps the host's factory rather than handing it over, because
+     * the hub owns the one thing a session cannot make for itself: the
+     * document's shared awareness store.
+     *
+     * @return Closure(string): Session
      */
-    public function sessions(): SessionFactory
+    public function sessions(): Closure
     {
-        return $this->sessions;
+        return fn (string $documentName): Session => ($this->sessions)(
+            $documentName,
+            $this->residents->awarenessFor($documentName),
+        );
     }
 
     public function add(Connection $connection): void
@@ -86,7 +104,7 @@ final class Hub
         $session = $connection->sessionFor($frame->documentName);
 
         try {
-            $replies = $session->receive($frame);
+            $reception = $session->receive($frame);
         } catch (DecodeException $failure) {
             $connection->close(CloseEvent::policyViolation($failure->getMessage()));
             $this->remove($connection);
@@ -118,9 +136,13 @@ final class Hub
             $this->subscribers[$frame->documentName][$connection->id] = true;
         }
 
-        $connection->sendAll($replies);
+        foreach ($reception->broadcasts as $broadcast) {
+            foreach ($this->peers($frame->documentName) as $peer) {
+                $peer->send($broadcast);
+            }
+        }
 
-        $this->fanOut($connection, $frame, $replies);
+        $connection->sendAll($reception->replies);
 
         if ($frame->message instanceof Close) {
             $this->leave($connection, $frame->documentName);
@@ -128,83 +150,8 @@ final class Hub
     }
 
     /**
-     * Pass an accepted change on to everyone else in the document.
-     *
-     * Only changes that were accepted travel. An update the session refused —
-     * because the sender may not write, or because it did not decode — must not
-     * reach anyone, or a read-only client could broadcast through a server that
-     * declined to store what it sent.
-     *
-     * @param  list<AddressedFrame>  $replies
-     */
-    private function fanOut(Connection $sender, AddressedFrame $frame, array $replies): void
-    {
-        // A connection speaks for nobody until it has authenticated for this
-        // document. An update is already covered by the accepted check below,
-        // since a session that refused to merge sends back no status. Awareness
-        // carries no status at all, so without this a stranger could put a
-        // cursor under any name in front of everyone in the document.
-        if (! $sender->sessionFor($frame->documentName)->isAuthenticated()) {
-            return;
-        }
-
-        $message = $frame->message;
-
-        if ($message instanceof Sync) {
-            $inner = $message->message;
-
-            // A step two answers our own step one, so it carries state the
-            // sender thinks we lack — relay it like any other update. A step
-            // one is a question and has nothing to relay.
-            if (! $inner instanceof SyncStep2 && ! $inner instanceof SyncUpdate) {
-                return;
-            }
-
-            if (! $this->wasAccepted($replies)) {
-                return;
-            }
-        } elseif (! $message instanceof Awareness) {
-            return;
-        }
-
-        // Awareness goes back to the sender too, which looks redundant and is
-        // load-bearing: @hocuspocus/provider force-closes a socket it has heard
-        // nothing on for messageReconnectTimeout (30s), counting only frames it
-        // received — "not even your own Awareness updates", as its own source
-        // puts it. A lone editor sends awareness every 15s and, without the
-        // echo, receives nothing between edits, so the client drops and
-        // reconnects on a loop. Hocuspocus itself broadcasts awareness to every
-        // connection including the origin (handleAwarenessUpdate iterates
-        // getConnections() with no exclusion); matching that is what keeps a
-        // solo session alive. Document updates stay peers-only: echoing a
-        // client's own update back is pure waste, and sync already answers it.
-        $recipients = $message instanceof Awareness
-            ? $this->peers($frame->documentName)
-            : $this->peers($frame->documentName, $sender);
-
-        foreach ($recipients as $peer) {
-            $peer->send($frame);
-        }
-    }
-
-    /**
-     * @param  list<AddressedFrame>  $replies
-     */
-    private function wasAccepted(array $replies): bool
-    {
-        foreach ($replies as $reply) {
-            if ($reply->message instanceof SyncStatus) {
-                return $reply->message->applied;
-            }
-        }
-
-        // No status at all means the session did not treat it as an update to
-        // accept — an unauthenticated client, for instance. Nothing to relay.
-        return false;
-    }
-
-    /**
-     * Everyone else with this document open.
+     * Everyone with this document open — including, unless excluded, whoever
+     * is asking.
      *
      * @return list<Connection>
      */
@@ -232,6 +179,13 @@ final class Hub
 
         unset($this->subscribers[$documentName][$connection->id]);
         $connection->forget($documentName);
+
+        // The last one out unloads the document. Presence dies with it, which
+        // is what presence means; anything durable went through the store.
+        if ($this->subscriberCount($documentName) === 0) {
+            unset($this->subscribers[$documentName]);
+            $this->residents->unload($documentName);
+        }
     }
 
     /**
@@ -244,6 +198,35 @@ final class Hub
         }
 
         unset($this->connections[$connection->id]);
+    }
+
+    /**
+     * Drop presence that has gone quiet, and tell each document's room.
+     *
+     * y-protocols expires a client thirty seconds after its last message and
+     * checks every three; Hocuspocus inherits that timer through its Awareness
+     * instance, and the daemon drives this one on the same cadence. Without
+     * it, a cursor whose socket died without closing — a laptop lid, a lost
+     * network — would stand in the document until the operating system gave
+     * up on the connection.
+     */
+    public function expireAwareness(?int $now = null): void
+    {
+        $now ??= (int) (microtime(true) * 1000);
+
+        foreach ($this->residents->each() as $documentName => $awareness) {
+            $change = $awareness->expire($now);
+
+            if ($change->removed === []) {
+                continue;
+            }
+
+            $frame = new AddressedFrame($documentName, new Awareness($awareness->updateFor($change->removed)));
+
+            foreach ($this->peers($documentName) as $peer) {
+                $peer->send($frame);
+            }
+        }
     }
 
     /**

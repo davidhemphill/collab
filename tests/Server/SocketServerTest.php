@@ -115,17 +115,38 @@ it('carries an edit from one real socket to another', function () {
                     return;
                 }
 
-                $frame = (new FrameReader)->read(substr($buffer, 2));
-                $buffer = '';
+                // Frames arrive back to back now that an accepted update is
+                // echoed ahead of its acknowledgement, so parse the stream
+                // rather than assuming one frame per read.
+                while (strlen($buffer) >= 2) {
+                    $length = ord($buffer[1]) & 0x7F;
+                    $offset = 2;
 
-                if (! $authenticated) {
-                    $authenticated = true;
-                    $onUpgrade($socket);
+                    if ($length === 126) {
+                        if (strlen($buffer) < 4) {
+                            return;
+                        }
 
-                    return;
+                        $length = unpack('n', substr($buffer, 2, 2))[1];
+                        $offset = 4;
+                    }
+
+                    if (strlen($buffer) < $offset + $length) {
+                        return;
+                    }
+
+                    $frame = (new FrameReader)->read(substr($buffer, $offset, $length));
+                    $buffer = substr($buffer, $offset + $length);
+
+                    if (! $authenticated) {
+                        $authenticated = true;
+                        $onUpgrade($socket);
+
+                        continue;
+                    }
+
+                    $onFrame($frame, $socket);
                 }
-
-                $onFrame($frame, $socket);
             });
 
             $socket->write(handshakeFor($address));
@@ -239,4 +260,63 @@ it('refuses a plain http request instead of leaving the socket open', function (
     $server->stop();
 
     expect($status)->toBeGreaterThanOrEqual(400);
+});
+
+it('pings on its interval and drops a connection that never answers', function () {
+    // The same liveness check Hocuspocus runs every thirty seconds, shortened
+    // here so the test can watch a full cycle: ping, silence, gone. The client
+    // deliberately swallows the ping instead of ponging, which is what a dead
+    // socket that TCP has not noticed yet looks like from this side.
+    $hub = new Hub(new SharedSessionFactory(authenticatorGranting(Scope::ReadWrite), memoryStore()));
+    $server = new SocketServer($hub, pingIntervalSeconds: 0.05);
+    $address = str_replace('tcp://', '', $server->listen('127.0.0.1', 0));
+
+    $pings = 0;
+    $closed = false;
+
+    (new Connector)->connect($address)->then(function (ConnectionInterface $socket) use ($address, &$pings, &$closed) {
+        $buffer = '';
+        $upgraded = false;
+
+        $socket->on('data', function (string $chunk) use (&$buffer, &$upgraded, &$pings) {
+            $buffer .= $chunk;
+
+            if (! $upgraded && str_contains($buffer, "\r\n\r\n")) {
+                $upgraded = true;
+                $buffer = substr($buffer, strpos($buffer, "\r\n\r\n") + 4);
+            }
+
+            while (strlen($buffer) >= 2) {
+                $opcode = ord($buffer[0]) & 0x0F;
+                $length = ord($buffer[1]) & 0x7F;
+
+                if (strlen($buffer) < 2 + $length) {
+                    return;
+                }
+
+                if ($opcode === 0x9) {
+                    $pings++;
+                }
+
+                $buffer = substr($buffer, 2 + $length);
+            }
+        });
+
+        $socket->on('close', function () use (&$closed) {
+            $closed = true;
+            Loop::stop();
+        });
+
+        $socket->write(handshakeFor($address));
+    });
+
+    until(function () use (&$closed) {
+        return $closed;
+    });
+
+    $server->stop();
+
+    expect($pings)->toBeGreaterThanOrEqual(1)
+        ->and($closed)->toBeTrue()
+        ->and($hub->connectionCount())->toBe(0);
 });

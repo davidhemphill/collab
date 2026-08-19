@@ -7,6 +7,7 @@ use Hemp\Collab\Protocol\FrameReader;
 use Hemp\Collab\Protocol\Message\Authentication;
 use Hemp\Collab\Protocol\Message\Awareness;
 use Hemp\Collab\Protocol\Message\Close;
+use Hemp\Collab\Protocol\Message\QueryAwareness;
 use Hemp\Collab\Protocol\Message\Sync;
 use Hemp\Collab\Protocol\Message\SyncStatus;
 use Hemp\Collab\Protocol\Scope;
@@ -21,6 +22,7 @@ use Hemp\Yjs\Protocol\Awareness\AwarenessEntry;
 use Hemp\Yjs\Protocol\Awareness\AwarenessUpdate;
 use Hemp\Yjs\Protocol\Sync\SyncStep1;
 use Hemp\Yjs\Protocol\Sync\SyncStep2;
+use Hemp\Yjs\Protocol\Sync\SyncUpdate;
 use Hemp\Yjs\Update\Update;
 use Psr\Log\AbstractLogger;
 
@@ -101,9 +103,6 @@ it('relays an accepted update to the other client', function () {
 
     say($hub, $alice, new Sync(SyncStep2::of(seeded())));
 
-    // Alice hears the acknowledgement; Bob hears the edit.
-    expect($alice->drain()[0]->message)->toBeInstanceOf(SyncStatus::class);
-
     $received = $bob->drain();
 
     expect($received)->toHaveCount(1)
@@ -112,7 +111,29 @@ it('relays an accepted update to the other client', function () {
         ->toBe(seeded()->structCount());
 });
 
-it('does not echo an update back to its sender', function () {
+it('relays an accepted change as an update, whatever it arrived as', function () {
+    // A step two answers *this server's* question. Relayed as a step two, it
+    // would tell every other client that its own question had been answered
+    // and flip their synced flags early. Hocuspocus always rebroadcasts as an
+    // Update; so does this.
+    [$hub] = hub();
+    $alice = client($hub, 'a');
+    $bob = client($hub, 'b');
+
+    authenticated($hub, $alice);
+    authenticated($hub, $bob);
+
+    say($hub, $alice, new Sync(SyncStep2::of(seeded())));
+
+    expect($bob->drain()[0]->message->message)
+        ->toBeInstanceOf(SyncUpdate::class);
+});
+
+it('echoes an accepted update back to its sender, before the acknowledgement', function () {
+    // Hocuspocus broadcasts to every connection with no origin exclusion, and
+    // the broadcast happens while the update is applied — before the status
+    // is written. The echo is also the only document traffic a lone editor
+    // receives, and the provider closes a socket it hears nothing on.
     [$hub] = hub();
     $alice = client($hub, 'a');
     authenticated($hub, $alice);
@@ -121,8 +142,28 @@ it('does not echo an update back to its sender', function () {
 
     $received = $alice->drain();
 
-    expect($received)->toHaveCount(1)
-        ->and($received[0]->message)->toBeInstanceOf(SyncStatus::class);
+    expect($received)->toHaveCount(2)
+        ->and($received[0]->message)->toBeInstanceOf(Sync::class)
+        ->and($received[1]->message)->toBeInstanceOf(SyncStatus::class);
+});
+
+it('does not echo an update that changed nothing', function () {
+    // Yjs emits no update event when a document did not change, so Hocuspocus
+    // broadcasts nothing. Every client answers the server's step one on every
+    // connect; echoing those answers would tell the whole room about nothing.
+    [$hub, $store] = hub();
+    $store->store('4711', seeded());
+
+    $alice = client($hub, 'a');
+    $bob = client($hub, 'b');
+
+    authenticated($hub, $alice);
+    authenticated($hub, $bob);
+
+    say($hub, $alice, new Sync(SyncStep2::of(seeded())));
+
+    expect($alice->drain()[0]->message)->toBeInstanceOf(SyncStatus::class)
+        ->and($bob->drain())->toBe([]);
 });
 
 it('never relays an update it refused', function () {
@@ -229,9 +270,10 @@ it('relays presence to the others', function () {
 
 it('echoes presence back to its sender, which keeps a lone editor connected', function () {
     // @hocuspocus/provider force-closes a socket it has received nothing on for
-    // 30 seconds. A single editor in a document sends awareness every 15s and
-    // would otherwise hear nothing back between edits, so it drops and
-    // reconnects on a loop. The echo is the keepalive.
+    // 30 seconds. A single editor in a document renews its awareness every 15s
+    // and would otherwise hear nothing back between edits, so it drops and
+    // reconnects on a loop. The renewal is accepted by the store — the clock
+    // advanced — and an accepted change goes to everyone, sender included.
     [$hub] = hub();
     $alice = client($hub, 'a');
 
@@ -469,5 +511,112 @@ describe('a failure inside the host application', function () {
             ->and($log->lines[0][0])->toBe('error')
             ->and($log->lines[0][1]['document'])->toBe('4711')
             ->and($log->lines[0][1]['exception'])->toBeInstanceOf(PDOException::class);
+    });
+});
+
+describe('presence expiry', function () {
+    it('drops a cursor that has gone quiet and tells the room', function () {
+        // A socket that dies without closing sends nothing, ever. y-protocols
+        // expires such a client thirty seconds after its last message;
+        // Hocuspocus inherits that timer, and so does this hub.
+        [$hub] = hub();
+        $alice = client($hub, 'a');
+        $bob = client($hub, 'b');
+
+        authenticated($hub, $alice);
+        authenticated($hub, $bob);
+
+        say($hub, $alice, new Awareness(new AwarenessUpdate([
+            new AwarenessEntry(7, 1, '{"name":"Ada"}'),
+        ])));
+        $bob->drain();
+
+        $hub->expireAwareness(now: (int) (microtime(true) * 1000) + 31_000);
+
+        $received = $bob->drain();
+
+        expect($received)->toHaveCount(1)
+            ->and($received[0]->message)->toBeInstanceOf(Awareness::class)
+            ->and($received[0]->message->update->entries[0]->isRemoval())->toBeTrue()
+            ->and($received[0]->message->update->entries[0]->client)->toBe(7);
+    });
+
+    it('leaves recent cursors alone', function () {
+        [$hub] = hub();
+        $alice = client($hub, 'a');
+        $bob = client($hub, 'b');
+
+        authenticated($hub, $alice);
+        authenticated($hub, $bob);
+
+        say($hub, $alice, new Awareness(new AwarenessUpdate([
+            new AwarenessEntry(7, 1, '{"name":"Ada"}'),
+        ])));
+        $bob->drain();
+
+        $hub->expireAwareness(now: (int) (microtime(true) * 1000) + 10_000);
+
+        expect($bob->drain())->toBe([]);
+    });
+});
+
+describe('document residency', function () {
+    it('shares one presence room among a document\'s connections', function () {
+        // Presence belongs to the document. Bob's session must answer a query
+        // with Ada's cursor even though Ada spoke on another connection.
+        [$hub] = hub();
+        $alice = client($hub, 'a');
+        $bob = client($hub, 'b');
+
+        authenticated($hub, $alice);
+        authenticated($hub, $bob);
+
+        say($hub, $alice, new Awareness(new AwarenessUpdate([
+            new AwarenessEntry(7, 1, '{"name":"Ada"}'),
+        ])));
+        $bob->drain();
+
+        say($hub, $bob, new QueryAwareness);
+
+        expect($bob->drain()[0]->message->update->entries[0]->client)->toBe(7);
+    });
+
+    it('unloads a document when its last connection leaves', function () {
+        // Presence dies with the room: a fresh set of connections must not
+        // inherit cursors from people who left before they arrived.
+        [$hub] = hub();
+        $alice = client($hub, 'a');
+
+        authenticated($hub, $alice);
+        say($hub, $alice, new Awareness(new AwarenessUpdate([
+            new AwarenessEntry(7, 1, '{"name":"Ada"}'),
+        ])));
+
+        $hub->remove($alice->connection);
+
+        $bob = client($hub, 'b');
+        authenticated($hub, $bob);
+        say($hub, $bob, new QueryAwareness);
+
+        expect($bob->drain()[0]->message->update->isEmpty())->toBeTrue();
+    });
+
+    it('tells a newcomer who is here before anything else happens', function () {
+        [$hub] = hub();
+        $alice = client($hub, 'a');
+
+        authenticated($hub, $alice);
+        say($hub, $alice, new Awareness(new AwarenessUpdate([
+            new AwarenessEntry(7, 1, '{"name":"Ada"}'),
+        ])));
+
+        $bob = client($hub, 'b');
+        say($hub, $bob, Authentication::token('good'));
+
+        $received = $bob->drain();
+
+        expect($received)->toHaveCount(2)
+            ->and($received[1]->message)->toBeInstanceOf(Awareness::class)
+            ->and($received[1]->message->update->entries[0]->client)->toBe(7);
     });
 });

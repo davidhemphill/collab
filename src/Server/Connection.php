@@ -29,12 +29,16 @@ final class Connection
     /**
      * @param  Closure(string): void  $send  Writes one frame to the client.
      * @param  Closure(CloseEvent): void  $disconnect
+     * @param  Closure(string): Session  $factory  Builds the session for a
+     *                                             document; comes from the hub,
+     *                                             which supplies the document's
+     *                                             shared awareness store.
      */
     public function __construct(
         public readonly string $id,
         private readonly Closure $send,
         private readonly Closure $disconnect,
-        private readonly SessionFactory $factory,
+        private readonly Closure $factory,
     ) {}
 
     /**

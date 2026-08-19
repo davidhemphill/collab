@@ -13,6 +13,7 @@ use Hemp\Collab\Server\SessionFactory;
 use Hemp\Collab\Server\SharedSessionFactory;
 use Hemp\Collab\Tests\Support\HostAuthenticator;
 use Hemp\Collab\Tests\Support\HostStore;
+use Hemp\Yjs\Protocol\Awareness\AwarenessStore;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Contracts\Support\DeferrableProvider;
 use Illuminate\Support\ServiceProvider;
@@ -65,7 +66,10 @@ it('shares one hub across the application', function () {
 });
 
 it('builds sessions that carry the host policy', function () {
-    $session = ($this->app->make(SessionFactory::class))('4711');
+    $session = ($this->app->make(SessionFactory::class))(
+        '4711',
+        new AwarenessStore,
+    );
 
     $session->receive(new AddressedFrame(
         '4711',
