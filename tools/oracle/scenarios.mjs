@@ -138,6 +138,53 @@ export const SCENARIOS = [
   },
 
   {
+    name: 'two-documents',
+    describes: 'one socket carrying two documents, kept apart',
+    async run({ connect, sleep }) {
+      const alpha = connect({ document: 'alpha' })
+      const beta = connect({ document: 'beta', socket: alpha.provider.configuration.websocketProvider })
+      await sleep(700)
+      alpha.text.insert(0, 'only alpha')
+      await sleep(400)
+      beta.text.insert(0, 'only beta')
+      await sleep(700)
+    },
+  },
+
+  {
+    name: 'viewer-in-a-busy-room',
+    describes: 'a read-only client watches editors it cannot join',
+    scope: 'readonly',
+    async run({ connect, sleep }) {
+      const a = connect()
+      await sleep(500)
+      a.provider.setAwarenessField('user', { name: 'Alice' })
+      await sleep(400)
+      const viewer = connect()
+      await sleep(700)
+      viewer.provider.setAwarenessField('user', { name: 'Viewer' })
+      await sleep(700)
+    },
+  },
+
+  {
+    name: 'rejoin-after-persist',
+    describes: 'an editor whose state the server already holds comes back fresh',
+    async run({ connect, sleep, Y }) {
+      const a = connect()
+      await sleep(500)
+      a.text.insert(0, 'persisted')
+      await sleep(500)
+      a.provider.destroy()
+      await sleep(400)
+      const back = connect()
+      await sleep(800)
+      back.text.insert(back.text.length, ' and more')
+      await sleep(600)
+    },
+  },
+
+  {
     name: 'reconnect',
     describes: 'a client that loses its socket and comes back',
     async run({ connect, sleep }) {

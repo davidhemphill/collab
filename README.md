@@ -512,8 +512,8 @@ An open session answers each message this way:
 |---|---|
 | Sync step 1 | Answers with the state the browser does not have, then asks a step 1 of its own |
 | Sync step 2, or an update | Merges it (read-write) or judges it (read-only), then answers `SyncStatus`. An update that changes nothing is acknowledged without a write. |
-| Awareness | Keeps it, and answers nothing. The hub sends it to the others. |
-| QueryAwareness | Answers with the presence that **this** connection introduced, or nothing |
+| Awareness | Applies it to the document's shared presence. What was accepted goes to everyone, the sender included; what was not is silence. |
+| QueryAwareness | Answers with everyone present in the document, even when that is nobody |
 | Stateless | Nothing |
 | Close | Nothing. The hub removes this document from the connection. |
 
@@ -572,40 +572,55 @@ handshake that the person is allowed to complete.
 The server therefore does not ask "did an update arrive?" It asks "would this
 update change anything?"
 
-| The update | The answer |
+| The message | The answer |
 |---|---|
-| Holds only state that the server already has | Accepted, and nothing changes |
-| Holds nothing | Accepted, and nothing changes |
-| Holds state that the server does not have | **Refused.** The document does not change and no other person sees it. |
+| A step 2 holding only state the server already has | Accepted, and nothing changes |
+| A step 2 holding nothing | Accepted, and nothing changes |
+| A step 2 holding state the server does not have | **Refused.** The document does not change and no other person sees it. |
+| An update, whatever it holds | **Refused**, without looking inside it. |
+
+The last row is an asymmetry worth pausing on. A step 2 answers the server's
+own question — the browser was obliged to send it, so it earns the check. An
+update is a write from someone who may not write, and Hocuspocus answers it
+with a refusal without opening it. This server does the same.
 
 This decision lives in `ReadOnlyPolicy` in the `hemp/yjs` package. It only
 decides. The session acts.
 
 ### Awareness and departure
 
-Awareness travels by relay. Each session keeps only the presence that its own
-connection introduced. When a connection sends an awareness update, the hub
-passes that same frame to every connection in the document, the sender
-included.
+Every connection to a document shares one presence room. The store that holds
+it lives with the document, not with any connection — the same shape as
+Hocuspocus, whose Document owns a single Awareness instance — and it follows
+the y-protocols rules exactly:
 
-The echo to the sender looks wasteful and holds the connection open. The
-provider closes a socket that it has received nothing on for 30 seconds, and it
-counts only the frames that arrive, so its own awareness does not postpone the
-timer. One person alone in a document sends awareness every 15 seconds. Without
-the echo that person receives nothing between edits, and the browser drops the
-connection and builds it again in a loop. Hocuspocus sends awareness to every
-connection for the same reason. A document update behaves differently: the
-sender already has it, and the sync answer goes back anyway.
+- A state is accepted when its clock is higher than the one the store knows.
+  A repeat of something already known is rejected silently. This matters more
+  than it looks: every browser restates every state it receives, and if those
+  restatements were relayed, presence would circulate through the room for
+  ever.
+- A client renewing its clock without changing its state is the heartbeat.
+  It is accepted and rebroadcast, and every peer's expiry timer starts over.
+- What the store accepts is sent to **every** connection in the document, the
+  sender included. The echo is what keeps one person alone in a document
+  connected: the provider closes a socket it has received nothing on for 30
+  seconds, counting only frames that arrive.
 
-When a socket goes away, the server must speak for the person who left, because
-a dropped socket sends no message of its own. The hub does this:
+A person who opens the document is told who is already there, at once, in the
+reply right after "you are in". Nobody waits for the others to renew.
 
-1. It asks the session which awareness clients this connection introduced.
-2. It builds a removal for exactly those clients.
-3. It sends the removal to the other connections in the document.
+Presence also ends in two ways without a goodbye:
 
-A connection can only ever retract its own clients. If it could retract any
-client, one person could remove another person from the cursor list.
+- **The socket closes.** The hub retracts the clients that connection
+  introduced — only those; a connection that could retract any client could
+  remove another person from the cursor list — and tells the room. The
+  departed client's clock is kept, so a message it sent before leaving cannot
+  reinstate its cursor.
+- **The socket goes silent.** A cursor that has not been heard from for 30
+  seconds is expired and its removal is announced, on the same timer
+  y-protocols runs. The daemon also pings each connection every 30 seconds
+  and drops one that does not answer, with close code 4408, exactly as
+  Hocuspocus does.
 
 ### Where each limit acts
 
@@ -635,10 +650,12 @@ package.
 |---|---|---|---|
 | 1008 | Policy Violation | No | A frame did not decode. The server sends this one. |
 | 1009 | Message Too Big | No | A frame went past `limits.frame_bytes`. The WebSocket layer makes it, but the server ends the socket instead of sending it. |
+| 1011 | Internal Error | Yes | Your `Authenticator` or `DocumentStore` threw an exception. |
 | 1012 | Service Restart | Yes | Defined, not sent yet |
 | 4205 | Reset Connection | Yes | Defined, not sent yet |
 | 4401 | Unauthorized | No | Defined, not sent yet |
 | 4403 | Forbidden | No | Defined, not sent yet |
+| 4408 | Connection Timeout | Yes | The connection stopped answering pings. |
 
 The code matters. A permanent refusal sent with a code that means "try again"
 gives you a browser that reconnects for ever.
@@ -1164,14 +1181,10 @@ This is correct behavior. Look at your `Authenticator`.
 
 ### A cursor stays on the screen after the person left
 
-The server sends a removal when the socket closes. If the socket did not close,
-for example because a proxy holds it open, the removal does not go out. Look at
-the timeouts of the proxy.
-
-### A person who joins late sees no cursors
-
-This is a known limit, not a fault. See
-[Limits of this version](#limits-of-this-version).
+The server sends a removal when the socket closes, and expires any cursor that
+has been silent for 30 seconds even when the socket did not close. A cursor
+that outlives both is a clock problem: check that the machine's clock is not
+jumping backwards, because expiry compares timestamps.
 
 ## Limits of this version
 
@@ -1182,10 +1195,8 @@ Read this list before you use the package for real documents.
 | The document is written for each change | Many writes to the database while a person types. This is correct but not fast. |
 | One process only | You cannot use two servers behind a load balancer. |
 | A slow browser has no limit | A browser that receives data slowly uses memory on the server. |
-| A person who joins late sees no cursors at once | `QueryAwareness` answers with the presence of the asking connection only. The other cursors appear when those persons next move, which the provider does about every 15 seconds. |
 | The real-provider test is manual | It needs an application and a running server, so `composer test` does not include it. See [How to run the tests](#how-to-run-the-tests). |
 | No certificate reloading | A renewed certificate is used when the server restarts, not before. |
-| No heartbeat | A socket that dies without closing — a laptop lid, a dropped network — is only noticed when the operating system gives up on the connection. Its cursor stays in the list until then. |
 | The `Origin` header is not checked | Any page may open a connection. It gets nothing without a token, so this is a door, not a hole, but a proxy in front of the server is the place to close it. |
 | Bytes sent in the same packet as the handshake are dropped | A browser cannot do this — it cannot send before the connection opens — but a client that writes the upgrade request and its first message together loses that message. |
 | Stateless messages do nothing | The server reads the `Stateless` message type but sends it to nobody. |
@@ -1199,7 +1210,7 @@ composer install
 composer test
 ```
 
-This checks the formatting and then runs 141 tests. They need no Node.js and no
+This checks the formatting and then runs 155 tests. They need no Node.js and no
 network. They take about one second.
 
 There are three groups:

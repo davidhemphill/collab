@@ -112,9 +112,19 @@ function startPhp(port, scope) {
   })
 }
 
-/** Start a real Hocuspocus with the same policy the PHP harness applies. */
+/**
+ * Start a real Hocuspocus with the same policy the PHP harness applies.
+ *
+ * It gets a memory store for the same reason the PHP harness has one: both
+ * servers must remember a document across a disconnect, or a reconnect
+ * scenario measures the difference between their harnesses instead of the
+ * difference between the servers.
+ */
 async function startHocuspocus(port, scope) {
   const { Server } = await import('@hocuspocus/server')
+  const { Database } = await import('@hocuspocus/extension-database')
+
+  const documents = new Map()
 
   const server = new Server({
     port,
@@ -124,6 +134,14 @@ async function startHocuspocus(port, scope) {
 
       return { user: 'harness' }
     },
+    extensions: [
+      new Database({
+        fetch: async ({ documentName }) => documents.get(documentName) ?? null,
+        store: async ({ documentName, state }) => {
+          documents.set(documentName, state)
+        },
+      }),
+    ],
   })
 
   await server.listen()
@@ -144,10 +162,10 @@ async function record(url, scenario) {
   const clients = []
 
   const connect = (options = {}) => {
-    const doc = options.document ?? new Y.Doc()
+    const doc = new Y.Doc()
     const provider = new HocuspocusProvider({
-      url,
-      name: scenario.document ?? '4711',
+      ...(options.socket ? { websocketProvider: options.socket } : { url }),
+      name: options.document ?? scenario.document ?? '4711',
       document: doc,
       token: options.token ?? 'good',
       WebSocketPolyfill: Socket,
