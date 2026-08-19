@@ -158,9 +158,13 @@ final class Session
         // provider only sends its state in answer to this question. Hocuspocus
         // replies the same way, and for the same reason.
         if ($message instanceof SyncStep1) {
+            // Our own question goes first. Hocuspocus writes the answer into
+            // the reply it is accumulating and sends the question immediately,
+            // so the question reaches the wire first; a client that treats the
+            // two as an ordered pair would see a different conversation.
             return [
-                $this->reply($frame, new Sync($message->answer($resident))),
                 $this->reply($frame, new Sync(new SyncStep1($resident->stateVector()))),
+                $this->reply($frame, new Sync($message->answer($resident))),
             ];
         }
 

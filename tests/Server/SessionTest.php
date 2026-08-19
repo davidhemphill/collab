@@ -94,8 +94,8 @@ describe('syncing', function () {
             new AddressedFrame('4711', new Sync(new SyncStep1(StateVector::empty()))),
         );
 
-        expect($replies[0]->message->message)->toBeInstanceOf(SyncStep2::class)
-            ->and($replies[0]->message->message->update()->structCount())
+        expect($replies[1]->message->message)->toBeInstanceOf(SyncStep2::class)
+            ->and($replies[1]->message->message->update()->structCount())
             ->toBe(seeded()->structCount());
     });
 
@@ -114,9 +114,10 @@ describe('syncing', function () {
         );
 
         expect($replies)->toHaveCount(2)
-            ->and($replies[1]->message->message)->toBeInstanceOf(SyncStep1::class)
-            ->and($replies[1]->message->message->stateVector->encode())
-            ->toBeBytes(seeded()->stateVector()->encode());
+            ->and($replies[0]->message->message)->toBeInstanceOf(SyncStep1::class)
+            ->and($replies[0]->message->message->stateVector->encode())
+            ->toBeBytes(seeded()->stateVector()->encode())
+            ->and($replies[1]->message->message)->toBeInstanceOf(SyncStep2::class);
     });
 
     it('asks for state even when it holds none', function () {
@@ -129,7 +130,7 @@ describe('syncing', function () {
             new AddressedFrame('4711', new Sync(new SyncStep1(StateVector::empty()))),
         );
 
-        expect($replies[1]->message->message)->toBeInstanceOf(SyncStep1::class);
+        expect($replies[0]->message->message)->toBeInstanceOf(SyncStep1::class);
     });
 
     it('merges a writer update into the store', function () {
@@ -218,7 +219,7 @@ describe('syncing', function () {
             new AddressedFrame('4711', new Sync(new SyncStep1(StateVector::empty()))),
         );
 
-        expect($replies[0]->message->message->update()->structCount())->toBeGreaterThan(0);
+        expect($replies[1]->message->message->update()->structCount())->toBeGreaterThan(0);
     });
 
     it('reads the document it was opened for, not the one a frame names', function () {
@@ -234,7 +235,7 @@ describe('syncing', function () {
             new AddressedFrame('4711', new Sync(new SyncStep1(StateVector::empty()))),
         );
 
-        expect($replies[0]->message->message->update()->structCount())->toBeGreaterThan(0);
+        expect($replies[1]->message->message->update()->structCount())->toBeGreaterThan(0);
     });
 });
 
