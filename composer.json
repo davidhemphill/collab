@@ -13,7 +13,7 @@
     "require": {
         "php": "^8.4",
         "guzzlehttp/psr7": "^2.7",
-        "hemp/yjs": "@dev",
+        "hemp/yjs": "^0.1",
         "illuminate/console": "^11.0|^12.0",
         "illuminate/support": "^11.0|^12.0",
         "psr/log": "^3.0",
@@ -31,7 +31,10 @@
             "type": "path",
             "url": "../yjs-php",
             "options": {
-                "symlink": true
+                "symlink": true,
+                "versions": {
+                    "hemp/yjs": "0.1.0"
+                }
             }
         }
     ],

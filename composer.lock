@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "5e1ac7b84ee4f9e4c4ca9675f342fe64",
+    "content-hash": "9c0022317fd0f5079702e738a8203e39",
     "packages": [
         {
             "name": "brick/math",
@@ -1107,7 +1107,7 @@
         },
         {
             "name": "hemp/yjs",
-            "version": "dev-main",
+            "version": "0.1.0",
             "dist": {
                 "type": "path",
                 "url": "../yjs-php",
@@ -10499,9 +10499,7 @@
     ],
     "aliases": [],
     "minimum-stability": "stable",
-    "stability-flags": {
-        "hemp/yjs": 20
-    },
+    "stability-flags": {},
     "prefer-stable": true,
     "prefer-lowest": false,
     "platform": {

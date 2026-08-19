@@ -85,36 +85,20 @@ Follow these five steps. The full explanation of each step comes after.
 
 ### Step 1: Install the package
 
-The package is not on Packagist yet. Add the two repositories to your
-`composer.json` file:
-
-```json
-{
-    "repositories": [
-        { "type": "vcs", "url": "https://github.com/davidhemphill/collab" },
-        { "type": "vcs", "url": "https://github.com/davidhemphill/yjs-php" }
-    ]
-}
-```
-
-Then install the two packages:
-
 ```bash
-composer require hemp/collab:@dev hemp/yjs:@dev
+composer require hemp/collab
 ```
 
-Name both packages. If you name only `hemp/collab`, composer stops with this
-message:
-
-```text
-hemp/collab dev-main requires hemp/yjs @dev
--> found hemp/yjs[dev-main] but it does not match your minimum-stability.
-```
-
-The `@dev` mark applies only to the package that you name. It does not apply to
-the packages that this package needs.
+This brings `hemp/yjs` with it, which is where the binary format lives.
 
 Laravel finds the package automatically. You do not register anything.
+
+The version is below `1.0`, so the API may change between releases. Pin it if
+that matters to you:
+
+```bash
+composer require hemp/collab:^0.1
+```
 
 ### Step 2: Add a column for the document
 
@@ -1132,16 +1116,6 @@ COLLAB_AUTHENTICATOR='App\Collaboration\DocumentAuthenticator'
 `Hemp\Collab\Server\Authenticator` in a service provider. The same applies to
 `collab.store` and `Hemp\Collab\Server\DocumentStore`.
 
-### `found hemp/yjs[dev-main] but it does not match your minimum-stability`
-
-**Cause:** you named only one package in the `composer require` command.
-
-**Correction:** name both.
-
-```bash
-composer require hemp/collab:@dev hemp/yjs:@dev
-```
-
 ### `The TLS file [...] does not exist or cannot be read`
 
 **Cause:** the certificate path or the key path is wrong, or the user that runs
@@ -1225,7 +1199,7 @@ composer install
 composer test
 ```
 
-This checks the formatting and then runs 131 tests. They need no Node.js and no
+This checks the formatting and then runs 141 tests. They need no Node.js and no
 network. They take about one second.
 
 There are three groups:
