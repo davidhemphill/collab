@@ -14,6 +14,9 @@ use Hemp\Collab\Protocol\Message\SyncStatus;
 use Hemp\Yjs\Exception\DecodeException;
 use Hemp\Yjs\Protocol\Sync\SyncStep2;
 use Hemp\Yjs\Protocol\Sync\SyncUpdate;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
+use Throwable;
 
 /**
  * Routes frames between connections.
@@ -46,6 +49,7 @@ final class Hub
     public function __construct(
         private readonly SessionFactory $sessions,
         private readonly FrameReader $frames = new FrameReader,
+        private readonly LoggerInterface $log = new NullLogger,
     ) {}
 
     /**
@@ -85,6 +89,22 @@ final class Hub
             $replies = $session->receive($frame);
         } catch (DecodeException $failure) {
             $connection->close(CloseEvent::policyViolation($failure->getMessage()));
+            $this->remove($connection);
+
+            return;
+        } catch (Throwable $failure) {
+            // The host's authenticator or store threw. That is one document's
+            // bad afternoon, not the server's: without this the exception
+            // leaves the event loop and takes every other connection, on every
+            // other document, down with it. The client is told to come back,
+            // and its unsent work returns with it on the next handshake.
+            $this->log->error('Collaboration session failed for {document}: {message}', [
+                'document' => $frame->documentName,
+                'message' => $failure->getMessage(),
+                'exception' => $failure,
+            ]);
+
+            $connection->close(CloseEvent::internalError());
             $this->remove($connection);
 
             return;

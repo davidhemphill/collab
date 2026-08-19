@@ -14,6 +14,7 @@ use Hemp\Collab\Server\SharedSessionFactory;
 use Hemp\Yjs\Protocol\Awareness\AwarenessLimits;
 use Illuminate\Contracts\Support\DeferrableProvider;
 use Illuminate\Support\ServiceProvider;
+use Psr\Log\LoggerInterface;
 use RuntimeException;
 
 /**
@@ -56,6 +57,7 @@ class CollabServiceProvider extends ServiceProvider implements DeferrableProvide
         $this->app->singleton(Hub::class, fn ($app) => new Hub(
             $app->make(SessionFactory::class),
             new FrameReader(awarenessLimits: $app->make(AwarenessLimits::class)),
+            $app->make(LoggerInterface::class),
         ));
     }
 

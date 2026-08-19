@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "8af40fbc55a280d63d1592ae68eec775",
+    "content-hash": "5e1ac7b84ee4f9e4c4ca9675f342fe64",
     "packages": [
         {
             "name": "brick/math",
@@ -1111,9 +1111,10 @@
             "dist": {
                 "type": "path",
                 "url": "../yjs-php",
-                "reference": "3b4817f1f01dfe65c18027b870543e459b7c7152"
+                "reference": "e0d9fd750205219b3f3de84620a620ea6838b2bc"
             },
             "require": {
+                "ext-mbstring": "*",
                 "php": "^8.4"
             },
             "require-dev": {

@@ -49,6 +49,18 @@ final class CloseEvent
         return new self(1012, 'Service Restart', clientShouldRetry: true);
     }
 
+    /**
+     * Something in the host application failed.
+     *
+     * Not the client's fault and not permanent, so the provider is told to
+     * come back: a database that was unreachable for one update is usually
+     * reachable for the retry. The connection dies; the process does not.
+     */
+    public static function internalError(string $reason = 'Internal Error'): self
+    {
+        return new self(1011, $reason, clientShouldRetry: true);
+    }
+
     /** The client sent something we could not parse. */
     public static function policyViolation(string $reason = 'Policy Violation'): self
     {

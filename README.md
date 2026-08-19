@@ -763,9 +763,12 @@ Two rules to remember:
   document between two calls. If you use an old value, you lose the work of that
   person.
 - **`store()` must complete before the person is safe.** The server tells the
-  browser that the change is safe only after `store()` returns. If `store()`
-  throws an exception, the server does not send that message, and the browser
-  keeps the change and sends it again.
+  browser that the change is safe only after `store()` returns.
+- **An exception from either method ends that one connection.** The server logs
+  it, closes that socket with code 1011, and keeps running for everyone else.
+  The browser reconnects, and because the server asks each browser what it holds
+  during the handshake, the change that did not store comes back with it. A
+  database that is down for a minute costs a minute of retries, not the work.
 
 ### How to bind them without the config file
 
@@ -1208,6 +1211,9 @@ Read this list before you use the package for real documents.
 | A person who joins late sees no cursors at once | `QueryAwareness` answers with the presence of the asking connection only. The other cursors appear when those persons next move, which the provider does about every 15 seconds. |
 | The real-provider test is manual | It needs an application and a running server, so `composer test` does not include it. See [How to run the tests](#how-to-run-the-tests). |
 | No certificate reloading | A renewed certificate is used when the server restarts, not before. |
+| No heartbeat | A socket that dies without closing — a laptop lid, a dropped network — is only noticed when the operating system gives up on the connection. Its cursor stays in the list until then. |
+| The `Origin` header is not checked | Any page may open a connection. It gets nothing without a token, so this is a door, not a hole, but a proxy in front of the server is the place to close it. |
+| Bytes sent in the same packet as the handshake are dropped | A browser cannot do this — it cannot send before the connection opens — but a client that writes the upgrade request and its first message together loses that message. |
 | Stateless messages do nothing | The server reads the `Stateless` message type but sends it to nobody. |
 | Provider version 4 does not work | Use `@hocuspocus/provider` version 3. |
 | No events | The `identity` value goes no further than the session. |

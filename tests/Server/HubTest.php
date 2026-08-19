@@ -10,7 +10,10 @@ use Hemp\Collab\Protocol\Message\Close;
 use Hemp\Collab\Protocol\Message\Sync;
 use Hemp\Collab\Protocol\Message\SyncStatus;
 use Hemp\Collab\Protocol\Scope;
+use Hemp\Collab\Server\Authenticated;
+use Hemp\Collab\Server\Authenticator;
 use Hemp\Collab\Server\Connection;
+use Hemp\Collab\Server\DocumentStore;
 use Hemp\Collab\Server\Hub;
 use Hemp\Collab\Server\SharedSessionFactory;
 use Hemp\Yjs\Id\StateVector;
@@ -18,6 +21,8 @@ use Hemp\Yjs\Protocol\Awareness\AwarenessEntry;
 use Hemp\Yjs\Protocol\Awareness\AwarenessUpdate;
 use Hemp\Yjs\Protocol\Sync\SyncStep1;
 use Hemp\Yjs\Protocol\Sync\SyncStep2;
+use Hemp\Yjs\Update\Update;
+use Psr\Log\AbstractLogger;
 
 /**
  * Two clients, one document.
@@ -348,4 +353,121 @@ it('requires each document on a connection to authenticate separately', function
     expect($alice->drain()[0]->message)->toBeInstanceOf(Authentication::class)
         ->and($alice->connection->sessionFor('9999')->isAuthenticated())->toBeFalse()
         ->and($alice->connection->sessionFor('4711')->isAuthenticated())->toBeTrue();
+});
+
+describe('a failure inside the host application', function () {
+    /**
+     * The event loop has no exception handler above it. Anything that escapes
+     * `Hub::receive` leaves PHP through `Loop::run()` as a fatal error, so a
+     * host whose database blinked does not lose one document — it loses the
+     * process, and every connection on every other document with it.
+     */
+    function failingHub(string $failIn): array
+    {
+        $store = new class($failIn) implements DocumentStore
+        {
+            public function __construct(private string $failIn) {}
+
+            public function load(string $documentName): Update
+            {
+                return Update::empty();
+            }
+
+            public function store(string $documentName, Update $update): void
+            {
+                if ($this->failIn === 'store') {
+                    throw new PDOException('SQLSTATE[08006] the database went away');
+                }
+            }
+        };
+
+        $authenticator = new class($failIn) implements Authenticator
+        {
+            public function __construct(private string $failIn) {}
+
+            public function authenticate(string $documentName, string $token): Authenticated
+            {
+                if ($this->failIn === 'authenticator') {
+                    throw new PDOException('SQLSTATE[08006] could not connect to server');
+                }
+
+                return new Authenticated(Scope::ReadWrite);
+            }
+        };
+
+        return [new Hub(new SharedSessionFactory($authenticator, $store)), $store];
+    }
+
+    it('closes the connection when the store throws, and keeps serving', function () {
+        [$hub] = failingHub('store');
+
+        $doomed = client($hub, 'c1');
+        $bystander = client($hub, 'c2');
+        authenticated($hub, $doomed);
+        authenticated($hub, $bystander, '4712');
+
+        say($hub, $doomed, new Sync(SyncStep2::of(seeded())));
+
+        expect($doomed->wasClosed())->toBeTrue()
+            ->and($doomed->connection->closedWith()->code)->toBe(1011)
+            ->and($doomed->connection->closedWith()->clientShouldRetry)->toBeTrue()
+            ->and($bystander->wasClosed())->toBeFalse();
+
+        // And the hub still answers the connection that did nothing wrong.
+        say($hub, $bystander, new Sync(new SyncStep1(StateVector::empty())), '4712');
+
+        expect($bystander->drain())->not->toBeEmpty();
+    });
+
+    it('closes the connection when the authenticator throws', function () {
+        // A refusal would be wrong here: the provider stops retrying on a
+        // permission denial, and an unreachable database is not an answer
+        // about permission.
+        [$hub] = failingHub('authenticator');
+
+        $doomed = client($hub, 'c1');
+        say($hub, $doomed, Authentication::token('good'));
+
+        expect($doomed->wasClosed())->toBeTrue()
+            ->and($doomed->connection->closedWith()->code)->toBe(1011)
+            ->and($doomed->connection->closedWith()->clientShouldRetry)->toBeTrue();
+    });
+
+    it('tells the host about it rather than failing silently', function () {
+        $log = new class extends AbstractLogger
+        {
+            public array $lines = [];
+
+            public function log($level, $message, array $context = []): void
+            {
+                $this->lines[] = [$level, $context];
+            }
+        };
+
+        $hub = new Hub(
+            new SharedSessionFactory(
+                authenticatorGranting(Scope::ReadWrite),
+                new class implements DocumentStore
+                {
+                    public function load(string $documentName): Update
+                    {
+                        throw new PDOException('SQLSTATE[08006] the database went away');
+                    }
+
+                    public function store(string $documentName, Update $update): void {}
+                },
+            ),
+            new FrameReader,
+            $log,
+        );
+
+        $client = client($hub, 'c1');
+        authenticated($hub, $client);
+        say($hub, $client, new Sync(new SyncStep1(StateVector::empty())));
+
+        expect($log->lines)->toHaveCount(1)
+            ->and($log->lines[0][0])->toBe('error')
+            ->and($log->lines[0][1]['document'])->toBe('4711')
+            ->and($log->lines[0][1]['exception'])->toBeInstanceOf(PDOException::class);
+    });
 });
