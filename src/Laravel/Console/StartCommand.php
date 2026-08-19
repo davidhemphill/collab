@@ -32,6 +32,11 @@ class StartCommand extends Command
 
         $address = $server->listen($host, $port);
 
+        // y-protocols expires presence thirty seconds after its last message
+        // and checks every three. Hocuspocus inherits that timer through its
+        // Awareness instance; this daemon has to wind it by hand.
+        $sweep = Loop::addPeriodicTimer(3.0, fn () => $hub->expireAwareness());
+
         $this->components->info("Collaboration server listening on {$address}");
         $this->components->twoColumnDetail(
             'Clients connect with',
@@ -44,11 +49,12 @@ class StartCommand extends Command
         // rather than dropping connections mid-frame. Persistence happens per
         // accepted update today, so there is no dirty state to flush — when the
         // store becomes debounced, the flush belongs here.
-        $stop = function (string $signal) use ($server): void {
+        $stop = function (string $signal) use ($server, $sweep): void {
             $this->newLine();
             $this->components->info("Received {$signal}, draining…");
 
             $server->stop();
+            Loop::cancelTimer($sweep);
 
             Loop::addTimer(1.0, fn () => Loop::stop());
         };

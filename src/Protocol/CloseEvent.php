@@ -49,6 +49,12 @@ final class CloseEvent
         return new self(1012, 'Service Restart', clientShouldRetry: true);
     }
 
+    /** A connection that stopped answering pings. Hocuspocus's 4408. */
+    public static function connectionTimeout(): self
+    {
+        return new self(4408, 'Connection Timeout', clientShouldRetry: true);
+    }
+
     /**
      * Something in the host application failed.
      *

@@ -42,6 +42,7 @@ final class SocketServer
         private readonly int $maxFrameBytes = 16 * 1024 * 1024,
         private readonly ?LoopInterface $loop = null,
         private readonly array $tls = [],
+        private readonly float $pingIntervalSeconds = 30.0,
     ) {}
 
     /**
@@ -177,16 +178,35 @@ final class SocketServer
 
         $this->hub->add($connection);
 
+        // The same liveness check Hocuspocus runs: ping on an interval, and a
+        // connection that has not answered by the next tick is gone. A socket
+        // that dies without closing — a laptop lid, a pulled cable — otherwise
+        // stays a connection for as long as the kernel humors it.
+        $pongReceived = true;
+        $loop = $this->loop ?? Loop::get();
+
+        $heartbeat = $loop->addPeriodicTimer($this->pingIntervalSeconds, function () use ($socket, $connection, &$pongReceived): void {
+            if (! $pongReceived) {
+                $connection->close(CloseEvent::connectionTimeout());
+
+                return;
+            }
+
+            $pongReceived = false;
+            $socket->write((new Frame('', true, Frame::OP_PING))->getContents());
+        });
+
         $messages = new MessageBuffer(
             new CloseFrameChecker,
             onMessage: function ($message) use ($connection): void {
                 $this->hub->receive($connection, (string) $message);
             },
-            onControl: function (Frame $frame) use ($socket): void {
+            onControl: function (Frame $frame) use ($socket, &$pongReceived): void {
                 match ($frame->getOpcode()) {
                     Frame::OP_PING => $socket->write(
                         (new Frame($frame->getPayload(), true, Frame::OP_PONG))->getContents(),
                     ),
+                    Frame::OP_PONG => $pongReceived = true,
                     Frame::OP_CLOSE => $socket->end(),
                     default => null,
                 };
@@ -201,7 +221,8 @@ final class SocketServer
 
         $socket->on('data', fn (string $chunk) => $messages->onData($chunk));
 
-        $socket->on('close', function () use ($connection): void {
+        $socket->on('close', function () use ($connection, $loop, $heartbeat): void {
+            $loop->cancelTimer($heartbeat);
             $this->hub->remove($connection);
         });
 
