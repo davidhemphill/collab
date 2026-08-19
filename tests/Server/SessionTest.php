@@ -10,12 +10,14 @@ use Hemp\Collab\Protocol\Message\Sync;
 use Hemp\Collab\Protocol\Message\SyncStatus;
 use Hemp\Collab\Protocol\Scope;
 use Hemp\Collab\Server\Authenticated;
+use Hemp\Collab\Server\DocumentStore;
 use Hemp\Collab\Server\Session;
 use Hemp\Yjs\Id\StateVector;
 use Hemp\Yjs\Protocol\Awareness\AwarenessEntry;
 use Hemp\Yjs\Protocol\Awareness\AwarenessUpdate;
 use Hemp\Yjs\Protocol\Sync\SyncStep1;
 use Hemp\Yjs\Protocol\Sync\SyncStep2;
+use Hemp\Yjs\Update\Update;
 
 /**
  * The session state machine, driven with no framework underneath it.
@@ -97,6 +99,39 @@ describe('syncing', function () {
             ->toBe(seeded()->structCount());
     });
 
+    it('asks the client for state of its own after answering', function () {
+        // The half that is easy to omit: without a step one of our own, a
+        // browser holding work the server lost keeps holding it, because
+        // nothing ever asks. Hocuspocus answers a step one the same way.
+        $store = memoryStore();
+        $store->store('4711', seeded());
+
+        $session = new Session(authenticatorGranting(Scope::ReadWrite), $store);
+        open($session);
+
+        $replies = $session->receive(
+            new AddressedFrame('4711', new Sync(new SyncStep1(StateVector::empty()))),
+        );
+
+        expect($replies)->toHaveCount(2)
+            ->and($replies[1]->message->message)->toBeInstanceOf(SyncStep1::class)
+            ->and($replies[1]->message->message->stateVector->encode())
+            ->toBeBytes(seeded()->stateVector()->encode());
+    });
+
+    it('asks for state even when it holds none', function () {
+        // A brand new document is exactly when the client is most likely to be
+        // the only place the work exists.
+        $session = new Session(authenticatorGranting(Scope::ReadWrite), memoryStore());
+        open($session);
+
+        $replies = $session->receive(
+            new AddressedFrame('4711', new Sync(new SyncStep1(StateVector::empty()))),
+        );
+
+        expect($replies[1]->message->message)->toBeInstanceOf(SyncStep1::class);
+    });
+
     it('merges a writer update into the store', function () {
         $store = memoryStore();
         $session = new Session(authenticatorGranting(Scope::ReadWrite), $store);
@@ -109,6 +144,37 @@ describe('syncing', function () {
         expect($replies[0]->message)->toBeInstanceOf(SyncStatus::class)
             ->and($replies[0]->message->applied)->toBeTrue()
             ->and($store->load('4711')->contains(seeded()))->toBeTrue();
+    });
+
+    it('does not write an update that changes nothing', function () {
+        // Every client answers the server's step one with a step two, and most
+        // carry nothing new. Writing those would be a database round trip per
+        // connection, and would take reading down with the write path.
+        $writes = 0;
+        $store = new class($writes) implements DocumentStore
+        {
+            public function __construct(public int &$writes) {}
+
+            public function load(string $documentName): Update
+            {
+                return seeded();
+            }
+
+            public function store(string $documentName, Update $update): void
+            {
+                $this->writes++;
+            }
+        };
+
+        $session = new Session(authenticatorGranting(Scope::ReadWrite), $store);
+        open($session);
+
+        $replies = $session->receive(
+            new AddressedFrame('4711', new Sync(SyncStep2::of(seeded()))),
+        );
+
+        expect($replies[0]->message->applied)->toBeTrue()
+            ->and($writes)->toBe(0);
     });
 
     it('refuses an update from a read-only session and stores nothing', function () {

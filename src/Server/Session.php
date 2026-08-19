@@ -148,8 +148,20 @@ final class Session
         $resident = $this->documents->load((string) $this->documentName);
 
         // Asking for state is always allowed; it asserts nothing.
+        //
+        // The answer is followed by a step one of our own, which is the half
+        // that is easy to leave out and expensive to miss. Without it the
+        // exchange is one-directional: the client learns what the server has
+        // and the server never learns what the client has. A browser holding
+        // work the server lost — after a restart, a failed store, a restored
+        // backup — would sit there holding it, because nothing ever asked. The
+        // provider only sends its state in answer to this question. Hocuspocus
+        // replies the same way, and for the same reason.
         if ($message instanceof SyncStep1) {
-            return [$this->reply($frame, new Sync($message->answer($resident)))];
+            return [
+                $this->reply($frame, new Sync($message->answer($resident))),
+                $this->reply($frame, new Sync(new SyncStep1($resident->stateVector()))),
+            ];
         }
 
         if (! $message instanceof SyncStep2 && ! $message instanceof SyncUpdate) {
@@ -193,7 +205,16 @@ final class Session
             return [$this->reply($frame, SyncStatus::rejected())];
         }
 
-        $this->documents->store((string) $this->documentName, $resident->merge($incoming));
+        // Now that the server asks for state of its own, every client answers
+        // with a step two on every handshake, and most of those carry nothing
+        // the server lacks. Writing them anyway would put a database round
+        // trip on each connect, and would make a store that is failing on the
+        // write path refuse reads too — the client would answer, the write
+        // would throw, and the connection would go down before it had read
+        // anything. An update that changes nothing is already stored.
+        if (! $incoming->isEmpty() && ! $resident->contains($incoming)) {
+            $this->documents->store((string) $this->documentName, $resident->merge($incoming));
+        }
 
         // A positive status means the update was validated and merged into the
         // server's state. It promises nothing about durability beyond whatever

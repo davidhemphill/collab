@@ -526,12 +526,22 @@ An open session answers each message this way:
 
 | Message from the browser | What the session does |
 |---|---|
-| Sync step 1 | Answers with the state that the browser does not have |
-| Sync step 2, or an update | Merges it (read-write) or judges it (read-only), then answers `SyncStatus` |
+| Sync step 1 | Answers with the state the browser does not have, then asks a step 1 of its own |
+| Sync step 2, or an update | Merges it (read-write) or judges it (read-only), then answers `SyncStatus`. An update that changes nothing is acknowledged without a write. |
 | Awareness | Keeps it, and answers nothing. The hub sends it to the others. |
 | QueryAwareness | Answers with the presence that **this** connection introduced, or nothing |
 | Stateless | Nothing |
 | Close | Nothing. The hub removes this document from the connection. |
+
+The step 1 the server sends back is the part worth understanding. A sync is a
+question in both directions: the browser asks what the server has, and the
+server must ask what the browser has. Leave the second question out and the
+exchange still looks correct — the browser receives the document and starts
+editing — but the server can never learn about work it does not already hold.
+A browser that was editing while the server was restarted, or restored from a
+backup, or lost a write, would sit there holding the only copy. The provider
+sends its state only in answer to this question, so the server asks it every
+time.
 
 One connection has one session for each document. A person who authenticates for
 document A gets nothing for document B. The browser uses one socket for every
