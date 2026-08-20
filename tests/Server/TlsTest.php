@@ -52,6 +52,29 @@ function selfSignedCertificate(): string
     return $path;
 }
 
+it('does not ask a browser for a client certificate', function () {
+    // PHP's verify_peer default was written for clients. On a server it turns
+    // the handshake into a CertificateRequest, which Chrome answers on a
+    // WebSocket by failing the connection — so a daemon that worked in every
+    // curl probe fails in every browser. Explicit configuration still wins.
+    $context = TlsContext::resolve([
+        'local_cert' => __FILE__,
+        'local_pk' => __FILE__,
+    ]);
+
+    expect($context['verify_peer'])->toBeFalse();
+});
+
+it('leaves an explicit mutual-TLS choice alone', function () {
+    $context = TlsContext::resolve([
+        'local_cert' => __FILE__,
+        'local_pk' => __FILE__,
+        'verify_peer' => true,
+    ]);
+
+    expect($context['verify_peer'])->toBeTrue();
+});
+
 it('answers a wss client with no proxy in front of it', function () {
     $path = selfSignedCertificate();
 

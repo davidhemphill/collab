@@ -41,6 +41,17 @@ final class TlsContext
             $context['local_pk'] = $key;
         }
 
+        // PHP's TLS defaults were written for clients, and verify_peer is one
+        // of them: on a server it makes the handshake demand a certificate
+        // from the browser. curl shrugs and sends none; Chrome answers a
+        // CertificateRequest on a WebSocket by failing the connection, so a
+        // daemon with these defaults works in every probe and fails in every
+        // browser. Reverb ships the same override. Explicit configuration
+        // still wins — mutual TLS remains possible for whoever asks for it.
+        if (self::secures($context)) {
+            $context += ['verify_peer' => false];
+        }
+
         self::verify($context);
 
         return $context;
