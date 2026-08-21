@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Hemp\Collab\Laravel\Console\RestartCommand;
 use Hemp\Collab\Protocol\AddressedFrame;
 use Hemp\Collab\Protocol\FrameReader;
 use Hemp\Collab\Protocol\Message\Authentication;
@@ -21,6 +22,8 @@ use Hemp\Yjs\Protocol\Awareness\AwarenessEntry;
 use Hemp\Yjs\Protocol\Awareness\AwarenessUpdate;
 use Hemp\Yjs\Protocol\Sync\SyncStep1;
 use Hemp\Yjs\Protocol\Sync\SyncStep2;
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Cache;
 use React\EventLoop\Loop;
 
 /**
@@ -427,6 +430,91 @@ describe('the resident layer, through a live daemon', function () {
 
         expect($served)->not->toBeNull('The restarted daemon never served the document.')
             ->and($served->structCount())->toBe(seeded()->structCount());
+    });
+});
+
+describe('restarting without touching the supervisor', function () {
+    /**
+     * collab:restart exists so a deploy script can bounce a daemon it cannot
+     * see: the command writes a timestamp into the shared cache, the daemon
+     * notices on its next poll, drains, and exits for its supervisor to
+     * start fresh — queue:restart's arrangement.
+     */
+    it('records the restart signal in the cache', function () {
+        $before = microtime(true);
+
+        $this->artisan('collab:restart')->assertSuccessful();
+
+        expect((float) Cache::get(RestartCommand::CACHE_KEY))
+            ->toBeGreaterThanOrEqual($before);
+    });
+
+    it('drains and exits when collab:restart signals it', function () {
+        // No Loop::stop() anywhere in this client: the only thing that can
+        // end the daemon — and the test — is the restart signal itself. The
+        // edit before it proves the exit is a drain, not an abandonment.
+        $store = $this->app->make(DocumentStore::class);
+
+        daemon(function (string $address) {
+            wsClient($address, function ($socket) {
+                $socket->write(clientFrame(
+                    (new AddressedFrame('4711', Authentication::token('anything')))->encode(),
+                ));
+            }, function (string $payload, $socket) {
+                $frame = (new FrameReader)->read($payload);
+
+                if ($frame->message instanceof Authentication) {
+                    $socket->write(clientFrame(
+                        (new AddressedFrame('4711', new Sync(SyncStep2::of(seeded()))))->encode(),
+                    ));
+
+                    return;
+                }
+
+                if ($frame->message instanceof SyncStatus && $frame->message->applied) {
+                    Artisan::call('collab:restart');
+                }
+            });
+        });
+
+        expect(isset($store->documents['4711']))
+            ->toBeTrue('The daemon exited without draining the document.')
+            ->and($store->documents['4711']->structCount())->toBe(seeded()->structCount());
+    });
+
+    it('ignores a restart signal sent before it booted', function () {
+        // The signal persists in the cache forever, so every future daemon
+        // sees it. Only a signal newer than the boot may stop the process,
+        // or each restart would immediately order the next.
+        Artisan::call('collab:restart');
+
+        $answered = false;
+
+        daemon(function (string $address) use (&$answered) {
+            wsClient($address, function ($socket) {
+                $socket->write(clientFrame(
+                    (new AddressedFrame('4711', Authentication::token('anything')))->encode(),
+                ));
+            }, function (string $payload, $socket) use (&$answered) {
+                $frame = (new FrameReader)->read($payload);
+
+                if ($frame->message instanceof Authentication) {
+                    // Outlive the daemon's poll, then check it still serves.
+                    Loop::addTimer(1.5, function () use ($socket) {
+                        $socket->write(clientFrame(
+                            (new AddressedFrame('4711', new Sync(new SyncStep1(StateVector::empty()))))->encode(),
+                        ));
+                    });
+
+                    return;
+                }
+
+                $answered = true;
+                Loop::stop();
+            });
+        });
+
+        expect($answered)->toBeTrue('The daemon died on a signal from before its boot.');
     });
 });
 

@@ -379,6 +379,7 @@ src/
 └── Laravel/
     ├── CollabServiceProvider.php Puts the parts in the Laravel container.
     ├── Console/StartCommand.php  The collab:start command.
+    ├── Console/RestartCommand.php  The collab:restart command.
     └── config/collab.php         The settings file.
 ```
 
@@ -870,14 +871,33 @@ To stop the server, press `Ctrl+C`. The server does this:
 
 1. It stops accepting new connections.
 2. It gives the work that is in progress one second to complete.
-3. It stops.
+3. It writes every document that still owes the store a write.
+4. It stops.
 
 `SIGTERM` does the same thing, so Supervisor and Docker stop the server the same
-way.
+way. No accepted change is lost to a graceful stop.
 
 **Important:** this process reads your PHP code one time, at the start. If you
-change your code, stop the server and start it again. Add this step to your
-deployment procedure.
+change your code, the running server must stop and start again. Do not do this
+by hand — add one line to your deployment procedure:
+
+```bash
+php artisan collab:restart
+```
+
+This works the way `queue:restart` works. The command writes a timestamp into
+your cache. The running server looks at the cache every second, sees the
+signal, drains its documents, and exits. Supervisor starts the fresh server
+with the new code. Nothing needs to find a process or talk to Supervisor, so
+the command works from a deployment script, a Forge deploy, or your terminal.
+
+Two conditions, both usually already true:
+
+- The command and the server must share one cache store — `redis`,
+  `database`, or `file` on the same machine. The `array` store lives and dies
+  inside a single process, so a signal sent through it reaches nobody.
+- Something must start the server again after it exits. That is Supervisor's
+  `autorestart=true` below; a Forge daemon does the same.
 
 ## How to install the server on a production machine
 
@@ -983,7 +1003,7 @@ than one machine, this package is not ready for you yet.
 - [ ] Supervisor, or another program, starts the server again if it stops.
 - [ ] The browser uses `wss://` if the page uses `https://`.
 - [ ] The read timeout of the proxy is much more than 60 seconds.
-- [ ] Your deployment procedure restarts the server after each code change.
+- [ ] Your deployment procedure runs `php artisan collab:restart` after each code change.
 - [ ] You read [Limits of this version](#limits-of-this-version).
 
 ## Commands
@@ -995,6 +1015,7 @@ For your application:
 | `php artisan collab:start` | Start the server |
 | `php artisan collab:start --host=0.0.0.0` | Start it on a different address |
 | `php artisan collab:start --port=4000` | Start it on a different port |
+| `php artisan collab:restart` | Ask the running server to drain and exit, so its supervisor starts it fresh |
 | `php artisan vendor:publish --tag=collab-config` | Copy `config/collab.php` into your application |
 
 For work on this package:

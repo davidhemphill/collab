@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Hemp\Collab\Laravel;
 
+use Hemp\Collab\Laravel\Console\RestartCommand;
 use Hemp\Collab\Laravel\Console\StartCommand;
 use Hemp\Collab\Protocol\FrameReader;
 use Hemp\Collab\Server\Authenticator;
@@ -83,7 +84,7 @@ class CollabServiceProvider extends ServiceProvider implements DeferrableProvide
                 __DIR__.'/config/collab.php' => $this->app->configPath('collab.php'),
             ], 'collab-config');
 
-            $this->commands([StartCommand::class]);
+            $this->commands([StartCommand::class, RestartCommand::class]);
         }
     }
 

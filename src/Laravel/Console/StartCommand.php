@@ -9,7 +9,9 @@ use Hemp\Collab\Server\Hub;
 use Hemp\Collab\Server\SocketServer;
 use Hemp\Collab\Server\TlsContext;
 use Illuminate\Console\Command;
+use Illuminate\Contracts\Cache\Factory;
 use React\EventLoop\Loop;
+use Throwable;
 
 class StartCommand extends Command
 {
@@ -19,8 +21,10 @@ class StartCommand extends Command
 
     protected $description = 'Start the Yjs collaboration server';
 
-    public function handle(Hub $hub): int
+    public function handle(Hub $hub, Factory $cache): int
     {
+        $bootedAt = microtime(true);
+
         $host = $this->option('host') ?: config('collab.host');
         $port = (int) ($this->option('port') ?: config('collab.port'));
 
@@ -54,7 +58,9 @@ class StartCommand extends Command
         // Stop accepting, then let the loop drain what is already in flight,
         // rather than dropping connections mid-frame. The dirty documents are
         // flushed after the loop returns, when nothing can dirty them again.
-        $stop = function (string $signal) use ($server, $sweep, $flush): void {
+        $restart = null;
+
+        $stop = function (string $signal) use ($server, $sweep, $flush, &$restart): void {
             $this->newLine();
             $this->components->info("Received {$signal}, draining…");
 
@@ -62,8 +68,30 @@ class StartCommand extends Command
             Loop::cancelTimer($sweep);
             Loop::cancelTimer($flush);
 
+            if ($restart !== null) {
+                Loop::cancelTimer($restart);
+            }
+
             Loop::addTimer(1.0, fn () => Loop::stop());
         };
+
+        // collab:restart writes a timestamp into the cache; a signal newer
+        // than this boot means "drain and exit", and the process supervisor
+        // starts the fresh daemon — queue:restart's arrangement, for a
+        // process a deploy script cannot reach any other way. A cache that
+        // cannot be read is not a reason to stop serving; the next second
+        // gets another try.
+        $restart = Loop::addPeriodicTimer(1.0, function () use ($cache, $bootedAt, $stop): void {
+            try {
+                $signal = (float) ($cache->store()->get(RestartCommand::CACHE_KEY) ?? 0.0);
+            } catch (Throwable) {
+                return;
+            }
+
+            if ($signal > $bootedAt) {
+                $stop('a restart signal');
+            }
+        });
 
         if (defined('SIGINT')) {
             Loop::addSignal(SIGINT, fn () => $stop('SIGINT'));

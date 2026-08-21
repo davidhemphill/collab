@@ -122,9 +122,10 @@ it('publishes a config file that exists', function () {
     }
 });
 
-it('registers the start command', function () {
+it('registers the start and restart commands', function () {
     expect(array_keys($this->app[Kernel::class]->all()))
-        ->toContain('collab:start');
+        ->toContain('collab:start')
+        ->toContain('collab:restart');
 });
 
 it('defers until something actually needs the server', function () {
