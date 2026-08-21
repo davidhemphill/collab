@@ -318,9 +318,11 @@ The sequence for one change:
 2. The provider sends the update to the server.
 3. The server asks your `Authenticator` if person A can write. It asks one time
    for each document, not one time for each change.
-4. The server reads the document with your `DocumentStore`, adds the update, and
-   writes the document again.
-5. The server tells person A that the change is safe.
+4. The server adds the update to its copy of the document in memory. It read
+   that copy with your `DocumentStore` one time, when the first person opened
+   the document; it writes it back after the typing pauses, and at least every
+   ten seconds — not for each letter.
+5. The server tells person A that the change is accepted.
 6. The server sends the update to person B.
 7. Yjs in the browser of person B adds the update. The letter appears.
 
@@ -365,6 +367,10 @@ src/
 │   ├── Connection.php            One socket, and the documents open on it.
 │   ├── DocumentStore.php         An interface. You write the class.
 │   ├── Hub.php                   Sends each change to the other persons.
+│   ├── Reception.php             A session's answer: replies, and news for the room.
+│   ├── ResidentDocument.php      One open document's state, and what the store is owed.
+│   ├── ResidentDocuments.php     The shared presence of each open document.
+│   ├── ResidentStore.php         Decorates your DocumentStore: load once, write on a debounce.
 │   ├── Session.php               One person, one document. The state machine.
 │   ├── SessionFactory.php        An interface that builds a session.
 │   ├── SharedSessionFactory.php  The usual one: the same classes for each document.
@@ -398,7 +404,7 @@ Connection       finds the session for that document name, or makes one
 Session          decides what to answer
    │
    ├──→ your Authenticator     (one time for each document)
-   └──→ your DocumentStore     (for each change)
+   └──→ your DocumentStore     (one load per open document; writes on a debounce)
    │
    ▼
 Session          returns a list of frames
@@ -425,6 +431,7 @@ returns strings, so the tests drive the full path with no port open.
 | `Session` | What do I answer this one person about this one document? |
 | `Connection` | Which documents does this socket have open? |
 | `Hub` | Who else must see this? |
+| `ResidentStore` | What state does each open document have right now, and what does the database still owe it? |
 | `SocketServer` | How do bytes get in and out? |
 
 ### The frame format
@@ -757,19 +764,29 @@ interface DocumentStore
 `$update->encode()` makes the bytes again. `Update::empty()` is a new document.
 A document that does not exist is normal, not an error.
 
-Two rules to remember:
+Three rules to remember:
 
-- **`load()` must read the database each time.** Do not keep the value in a
-  variable for the life of the connection. Another person can change the
-  document between two calls. If you use an old value, you lose the work of that
-  person.
-- **`store()` must complete before the person is safe.** The server tells the
-  browser that the change is safe only after `store()` returns.
-- **An exception from either method ends that one connection.** The server logs
-  it, closes that socket with code 1011, and keeps running for everyone else.
-  The browser reconnects, and because the server asks each browser what it holds
-  during the handshake, the change that did not store comes back with it. A
-  database that is down for a minute costs a minute of retries, not the work.
+- **The server calls `load()` once per open document, not per message.** The
+  first person to open a document triggers one `load()`. After that the
+  document lives in the server's memory for as long as anyone has it open, and
+  every change merges there. Your `load()` should still read the database
+  fresh each time it is called — the server decides when that is, and when it
+  asks, it wants the truth.
+- **`store()` runs on a debounce, not per keystroke.** The server writes the
+  document after `persistence.quiet_seconds` without a change (default 2), at
+  least every `persistence.max_wait_seconds` while the typing never pauses
+  (default 10), and always when the last person leaves. These are Hocuspocus's
+  numbers. A positive `SyncStatus` therefore means "merged into the server's
+  document", with the write at most `max_wait_seconds` behind. If the server
+  dies inside that window, the browsers still hold the document — the server
+  asks each browser what it holds during the handshake, so the missing tail
+  comes back when any of them reconnects.
+- **An exception from `store()` costs a retry, not the connection.** By the
+  time the write happens, the change was acknowledged long ago. The document
+  stays in memory, stays marked dirty, and the server tries again with backoff
+  until the write lands. A dirty document is never dropped. An exception from
+  `load()` still ends that one connection with code 1011: there is nothing in
+  memory yet to serve, and the browser should come back later.
 
 ### How to bind them without the config file
 
@@ -804,6 +821,8 @@ php artisan vendor:publish --tag=collab-config
 | `options.tls.passphrase` | `COLLAB_TLS_PASSPHRASE` | none | Passphrase, if the key has one |
 | `authenticator` | `COLLAB_AUTHENTICATOR` | none | Your `Authenticator` class |
 | `store` | `COLLAB_STORE` | none | Your `DocumentStore` class |
+| `persistence.quiet_seconds` | `COLLAB_STORE_QUIET_SECONDS` | 2 | Write the document this long after the typing pauses |
+| `persistence.max_wait_seconds` | `COLLAB_STORE_MAX_WAIT_SECONDS` | 10 | Write at least this often while the typing never pauses |
 | `limits.frame_bytes` | `COLLAB_MAX_FRAME_BYTES` | 16 MB | The largest message from a browser |
 | `limits.awareness_clients` | `COLLAB_MAX_AWARENESS_CLIENTS` | 512 | The largest number of cursors in one message |
 | `limits.awareness_state_bytes` | `COLLAB_MAX_AWARENESS_STATE_BYTES` | 64 KB | The largest cursor data for one person |
@@ -1192,7 +1211,7 @@ Read this list before you use the package for real documents.
 
 | Limit | Result |
 |---|---|
-| The document is written for each change | Many writes to the database while a person types. This is correct but not fast. |
+| The write is debounced | A `kill -9` can lose up to `persistence.max_wait_seconds` of accepted changes from the server's copy. The browsers still hold them, and the handshake takes them back when one reconnects — but until a browser that saw the changes reconnects, the database is behind. A graceful stop (SIGTERM) loses nothing: the server writes every dirty document before it exits. |
 | One process only | You cannot use two servers behind a load balancer. |
 | A slow browser has no limit | A browser that receives data slowly uses memory on the server. |
 | The real-provider test is manual | It needs an application and a running server, so `composer test` does not include it. See [How to run the tests](#how-to-run-the-tests). |

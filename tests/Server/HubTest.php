@@ -16,6 +16,7 @@ use Hemp\Collab\Server\Authenticator;
 use Hemp\Collab\Server\Connection;
 use Hemp\Collab\Server\DocumentStore;
 use Hemp\Collab\Server\Hub;
+use Hemp\Collab\Server\ResidentStore;
 use Hemp\Collab\Server\SharedSessionFactory;
 use Hemp\Yjs\Id\StateVector;
 use Hemp\Yjs\Protocol\Awareness\AwarenessEntry;
@@ -441,6 +442,10 @@ describe('a failure inside the host application', function () {
     }
 
     it('closes the connection when the store throws, and keeps serving', function () {
+        // This hub wires the raw store straight into the sessions, so the
+        // write happens on the accept path and its failure lands on the
+        // connection. Behind the resident layer the same failure costs a
+        // retry instead — see the debounced persistence tests.
         [$hub] = failingHub('store');
 
         $doomed = client($hub, 'c1');
@@ -618,5 +623,118 @@ describe('document residency', function () {
         expect($received)->toHaveCount(2)
             ->and($received[1]->message)->toBeInstanceOf(Awareness::class)
             ->and($received[1]->message->update->entries[0]->client)->toBe(7);
+    });
+});
+
+describe('debounced persistence', function () {
+    /**
+     * The resident store decorating the backing one and wired as the
+     * sessions' store — the deployment shape the Laravel provider produces.
+     * The sessions and the hub must share the one instance, or the hub would
+     * flush and unload documents the sessions never told it about.
+     */
+    function residentHub(DocumentStore $store): array
+    {
+        $clock = new class
+        {
+            public float $now = 1_000.0;
+        };
+
+        $resident = new ResidentStore(
+            $store,
+            quietSeconds: 2.0,
+            maxWaitSeconds: 10.0,
+            clock: fn (): float => $clock->now,
+        );
+
+        $hub = new Hub(
+            new SharedSessionFactory(authenticatorGranting(Scope::ReadWrite), $resident),
+            documents: $resident,
+        );
+
+        return [$hub, $clock];
+    }
+
+    it('acknowledges a keystroke without a database write', function () {
+        $store = memoryStore();
+        [$hub, $clock] = residentHub($store);
+
+        $alice = client($hub, 'a');
+        authenticated($hub, $alice);
+
+        say($hub, $alice, new Sync(SyncStep2::of(seeded())));
+
+        // Accepted and echoed — and the backing store has seen nothing.
+        expect($alice->drain()[1]->message->applied)->toBeTrue()
+            ->and($store->documents)->toBe([]);
+
+        // The write happens when the flush sweep finds the quiet timer up.
+        $clock->now += 3.0;
+        $hub->flushDocuments();
+
+        expect($store->documents['4711']->structCount())->toBe(seeded()->structCount());
+    });
+
+    it('flushes the document when its last connection leaves', function () {
+        $store = memoryStore();
+        [$hub] = residentHub($store);
+
+        $alice = client($hub, 'a');
+        authenticated($hub, $alice);
+        say($hub, $alice, new Sync(SyncStep2::of(seeded())));
+
+        $hub->remove($alice->connection);
+
+        expect($store->documents['4711']->structCount())->toBe(seeded()->structCount());
+    });
+
+    it('survives a store failure without losing the change or the connection', function () {
+        // The counterpart to "closes the connection when the store throws":
+        // with the resident layer between, the write happens long after the
+        // acknowledgement, so a database that blinks costs a retry — not the
+        // socket, and not the work.
+        $store = new class implements DocumentStore
+        {
+            /** @var array<string, Update> */
+            public array $documents = [];
+
+            public bool $failing = true;
+
+            public function load(string $documentName): Update
+            {
+                return $this->documents[$documentName] ?? Update::empty();
+            }
+
+            public function store(string $documentName, Update $update): void
+            {
+                if ($this->failing) {
+                    throw new PDOException('SQLSTATE[08006] the database went away');
+                }
+
+                $this->documents[$documentName] = $update;
+            }
+        };
+
+        [$hub, $clock] = residentHub($store);
+
+        $alice = client($hub, 'a');
+        authenticated($hub, $alice);
+        say($hub, $alice, new Sync(SyncStep2::of(seeded())));
+
+        expect($alice->drain()[1]->message->applied)->toBeTrue();
+
+        $clock->now += 3.0;
+        $hub->flushDocuments();
+
+        // The write failed, quietly: the connection is still open, the
+        // change is still resident, and the next person to ask is served it.
+        expect($alice->wasClosed())->toBeFalse()
+            ->and($store->documents)->toBe([]);
+
+        $store->failing = false;
+        $clock->now += 2.0;
+        $hub->flushDocuments();
+
+        expect($store->documents['4711']->structCount())->toBe(seeded()->structCount());
     });
 });

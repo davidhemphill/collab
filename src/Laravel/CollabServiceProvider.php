@@ -10,6 +10,7 @@ use Hemp\Collab\Server\Authenticator;
 use Hemp\Collab\Server\DocumentStore;
 use Hemp\Collab\Server\Hub;
 use Hemp\Collab\Server\ResidentDocuments;
+use Hemp\Collab\Server\ResidentStore;
 use Hemp\Collab\Server\SessionFactory;
 use Hemp\Collab\Server\SharedSessionFactory;
 use Hemp\Yjs\Protocol\Awareness\AwarenessLimits;
@@ -47,9 +48,21 @@ class CollabServiceProvider extends ServiceProvider implements DeferrableProvide
             maxStateBytes: (int) $app['config']->get('collab.limits.awareness_state_bytes'),
         ));
 
+        // The resident layer decorating the host's store: the document is
+        // loaded once per open, merged in memory per keystroke, and written
+        // back on a debounce. One instance, shared by the session factory
+        // (which uses it as the store) and the hub (which drives its flush
+        // and unload lifecycle) — two instances would be two truths.
+        $this->app->singleton(ResidentStore::class, fn ($app) => new ResidentStore(
+            $app->make(DocumentStore::class),
+            quietSeconds: (float) $app['config']->get('collab.persistence.quiet_seconds', 2.0),
+            maxWaitSeconds: (float) $app['config']->get('collab.persistence.max_wait_seconds', 10.0),
+            log: $app->make(LoggerInterface::class),
+        ));
+
         $this->app->singleton(SessionFactory::class, fn ($app) => new SharedSessionFactory(
             $app->make(Authenticator::class),
-            $app->make(DocumentStore::class),
+            $app->make(ResidentStore::class),
         ));
 
         // Both halves of the same policy: the reader refuses an oversized
@@ -59,6 +72,7 @@ class CollabServiceProvider extends ServiceProvider implements DeferrableProvide
             new FrameReader(awarenessLimits: $app->make(AwarenessLimits::class)),
             $app->make(LoggerInterface::class),
             new ResidentDocuments($app->make(AwarenessLimits::class)),
+            $app->make(ResidentStore::class),
         ));
     }
 
@@ -78,7 +92,14 @@ class CollabServiceProvider extends ServiceProvider implements DeferrableProvide
      */
     public function provides(): array
     {
-        return [Authenticator::class, DocumentStore::class, AwarenessLimits::class, SessionFactory::class, Hub::class];
+        return [
+            Authenticator::class,
+            DocumentStore::class,
+            AwarenessLimits::class,
+            ResidentStore::class,
+            SessionFactory::class,
+            Hub::class,
+        ];
     }
 
     /**

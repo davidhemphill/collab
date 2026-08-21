@@ -52,11 +52,20 @@ final class Hub
 
     private readonly ResidentDocuments $residents;
 
+    /**
+     * @param  ?ResidentStore  $documents  The debounced layer the sessions use
+     *                                     as their store, when persistence is
+     *                                     wired that way. The hub owns the two
+     *                                     moments the layer cannot see for
+     *                                     itself: the last person leaving, and
+     *                                     the daemon's flush cadence.
+     */
     public function __construct(
         private readonly SessionFactory $sessions,
         private readonly FrameReader $frames = new FrameReader,
         private readonly LoggerInterface $log = new NullLogger,
         ?ResidentDocuments $residents = null,
+        private readonly ?ResidentStore $documents = null,
     ) {
         $this->residents = $residents ?? new ResidentDocuments;
     }
@@ -181,10 +190,13 @@ final class Hub
         $connection->forget($documentName);
 
         // The last one out unloads the document. Presence dies with it, which
-        // is what presence means; anything durable went through the store.
+        // is what presence means; the document's state is flushed if a
+        // debounced write was still owed, and stays resident until that
+        // write lands.
         if ($this->subscriberCount($documentName) === 0) {
             unset($this->subscribers[$documentName]);
             $this->residents->unload($documentName);
+            $this->documents?->unload($documentName);
         }
     }
 
@@ -227,6 +239,27 @@ final class Hub
                 $peer->send($frame);
             }
         }
+    }
+
+    /**
+     * Write every resident document whose debounce has run out.
+     *
+     * The daemon drives this on a short cadence, exactly as it drives
+     * {@see expireAwareness()}. Does nothing unless a {@see ResidentStore}
+     * was wired in — the debounced-persistence configuration.
+     */
+    public function flushDocuments(): void
+    {
+        $this->documents?->flush();
+    }
+
+    /**
+     * Write everything dirty immediately, for shutdown. Returns how many
+     * documents could not be written.
+     */
+    public function drainDocuments(): int
+    {
+        return $this->documents?->drain() ?? 0;
     }
 
     /**

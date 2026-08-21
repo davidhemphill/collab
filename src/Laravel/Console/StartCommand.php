@@ -37,6 +37,12 @@ class StartCommand extends Command
         // Awareness instance; this daemon has to wind it by hand.
         $sweep = Loop::addPeriodicTimer(3.0, fn () => $hub->expireAwareness());
 
+        // The debounced writes: every second, any document whose quiet or
+        // max-wait timer has run out is written back. The check itself only
+        // walks an in-memory map, so the cadence can be tighter than the
+        // shortest timer it enforces.
+        $flush = Loop::addPeriodicTimer(1.0, fn () => $hub->flushDocuments());
+
         $this->components->info("Collaboration server listening on {$address}");
         $this->components->twoColumnDetail(
             'Clients connect with',
@@ -46,15 +52,15 @@ class StartCommand extends Command
         $this->newLine();
 
         // Stop accepting, then let the loop drain what is already in flight,
-        // rather than dropping connections mid-frame. Persistence happens per
-        // accepted update today, so there is no dirty state to flush — when the
-        // store becomes debounced, the flush belongs here.
-        $stop = function (string $signal) use ($server, $sweep): void {
+        // rather than dropping connections mid-frame. The dirty documents are
+        // flushed after the loop returns, when nothing can dirty them again.
+        $stop = function (string $signal) use ($server, $sweep, $flush): void {
             $this->newLine();
             $this->components->info("Received {$signal}, draining…");
 
             $server->stop();
             Loop::cancelTimer($sweep);
+            Loop::cancelTimer($flush);
 
             Loop::addTimer(1.0, fn () => Loop::stop());
         };
@@ -67,6 +73,27 @@ class StartCommand extends Command
         Loop::run();
 
         $server->stop();
+
+        // Every in-flight frame has been handled once the loop returns, so
+        // what is dirty now is final. A store that is down right now gets two
+        // more tries a second apart — enough for a blink, and a client that
+        // saw the edits will hand them back on reconnect if the store stays
+        // down beyond that.
+        $stillDirty = $hub->drainDocuments();
+
+        for ($attempt = 0; $stillDirty > 0 && $attempt < 2; $attempt++) {
+            sleep(1);
+            $stillDirty = $hub->drainDocuments();
+        }
+
+        if ($stillDirty > 0) {
+            $this->components->error(
+                "{$stillDirty} document(s) could not be written to the store; ".
+                'their latest changes return when a client that holds them reconnects.',
+            );
+
+            return self::FAILURE;
+        }
 
         $this->components->info('Collaboration server stopped.');
 

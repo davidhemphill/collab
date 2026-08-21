@@ -8,17 +8,21 @@ use Hemp\Yjs\Protocol\Awareness\AwarenessLimits;
 use Hemp\Yjs\Protocol\Awareness\AwarenessStore;
 
 /**
- * The state a document has only while someone has it open.
+ * The presence a document has only while someone has it open.
  *
- * Awareness is the whole of it today. Presence is a property of the document,
- * not of any one connection: everyone editing "4711" must see the same set of
- * cursors, which means every session for "4711" has to share one store.
- * Hocuspocus reaches the same place by giving its Document a single Awareness
- * instance; this is that, without the document.
+ * Presence is a property of the document, not of any one connection:
+ * everyone editing "4711" must see the same set of cursors, which means
+ * every session for "4711" has to share one store. Hocuspocus reaches the
+ * same place by giving its Document a single Awareness instance; this is
+ * that, without the document.
  *
- * A document whose last connection leaves is unloaded, and its presence dies
- * with it — correctly, since presence is defined as who is here now, and the
- * answer just became nobody.
+ * The document itself lives in {@see ResidentStore}, which decorates the
+ * host's store with the same residency idea applied to state instead of
+ * presence. The two are deliberately separate objects with separate rules: a
+ * document whose last connection leaves loses its presence immediately —
+ * correctly, since presence is defined as who is here now, and the answer
+ * just became nobody — while its state must outlive the room until the last
+ * write lands.
  */
 final class ResidentDocuments
 {

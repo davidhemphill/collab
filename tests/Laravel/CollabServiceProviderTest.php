@@ -5,15 +5,18 @@ declare(strict_types=1);
 use Hemp\Collab\Laravel\CollabServiceProvider;
 use Hemp\Collab\Protocol\AddressedFrame;
 use Hemp\Collab\Protocol\Message\Authentication;
+use Hemp\Collab\Protocol\Message\Sync;
 use Hemp\Collab\Protocol\Scope;
 use Hemp\Collab\Server\Authenticator;
 use Hemp\Collab\Server\DocumentStore;
 use Hemp\Collab\Server\Hub;
+use Hemp\Collab\Server\ResidentStore;
 use Hemp\Collab\Server\SessionFactory;
 use Hemp\Collab\Server\SharedSessionFactory;
 use Hemp\Collab\Tests\Support\HostAuthenticator;
 use Hemp\Collab\Tests\Support\HostStore;
 use Hemp\Yjs\Protocol\Awareness\AwarenessStore;
+use Hemp\Yjs\Protocol\Sync\SyncStep2;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Contracts\Support\DeferrableProvider;
 use Illuminate\Support\ServiceProvider;
@@ -78,6 +81,25 @@ it('builds sessions that carry the host policy', function () {
 
     expect($session->identity())->toBe('host')
         ->and($session->scope())->toBe(Scope::ReadWrite);
+});
+
+it('debounces persistence through one resident layer shared by sessions and hub', function () {
+    // The sessions write into the residents; the hub flushes them. Wired as
+    // two instances, an accepted change would sit in one map while the other
+    // — the one the daemon drains — stayed forever empty, and this test is
+    // the only thing standing between that mistake and production.
+    $session = ($this->app->make(SessionFactory::class))('4711', new AwarenessStore);
+
+    $session->receive(new AddressedFrame('4711', Authentication::token('anything')));
+    $session->receive(new AddressedFrame('4711', new Sync(SyncStep2::of(seeded()))));
+
+    $host = $this->app->make(DocumentStore::class);
+
+    expect($this->app->make(ResidentStore::class))->toBe($this->app->make(ResidentStore::class))
+        ->and($host->documents)->toBe([]);
+
+    expect($this->app->make(Hub::class)->drainDocuments())->toBe(0)
+        ->and($host->documents['4711']->structCount())->toBe(seeded()->structCount());
 });
 
 it('says which config key is missing rather than failing as a container error', function () {

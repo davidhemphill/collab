@@ -70,6 +70,29 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Persistence
+    |--------------------------------------------------------------------------
+    |
+    | While anyone has a document open, its truth lives in the daemon's memory
+    | and the database catches up on a debounce — autosave, basically. A write
+    | happens after `quiet_seconds` without an accepted change, or every
+    | `max_wait_seconds` while the typing never pauses, and always when the
+    | last person leaves. These are Hocuspocus's defaults.
+    |
+    | A positive sync status therefore means "merged in memory", with the disk
+    | write at most `max_wait_seconds` behind. Every browser holds the full
+    | document too, and the handshake asks for anything the server is missing,
+    | so a crash inside that window heals when any client reconnects.
+    |
+    */
+
+    'persistence' => [
+        'quiet_seconds' => (float) env('COLLAB_STORE_QUIET_SECONDS', 2),
+        'max_wait_seconds' => (float) env('COLLAB_STORE_MAX_WAIT_SECONDS', 10),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Limits
     |--------------------------------------------------------------------------
     |
